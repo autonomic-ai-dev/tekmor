@@ -29,7 +29,6 @@ Summary: The scripts, Makefile and Containerfile that install, build, sign, rele
 ## Code
 
 - `.gitignore`
-- `Containerfile`
 - `Makefile`
 - `scripts`
 

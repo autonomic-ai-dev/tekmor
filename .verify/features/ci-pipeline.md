@@ -27,7 +27,6 @@ Summary: GitHub Actions for tekmor. One CI workflow runs clippy, the Rust tests 
 ## Code
 
 - `.github/workflows`
-- `.github/pipelines`
 
 ## How to get to it (user POV)
 
