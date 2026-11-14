@@ -61,6 +61,8 @@ pub struct Receipt {
     pub protected_changes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flaky: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_gap: Option<String>,
 }
 
 pub fn build_receipt(
@@ -94,6 +96,7 @@ pub fn build_receipt(
         requirements: Vec::new(),
         protected_changes: Vec::new(),
         flaky,
+        review_gap: None,
     }
 }
 
@@ -189,6 +192,10 @@ pub fn receipt_for_project(store: &BrainStore, root: &Path) -> Result<Receipt> {
         None => Vec::new(),
     };
     let mut receipt = build_receipt(&rows, head.as_deref(), code.as_deref());
+    if let Some(gap) = crate::review::gap(root, code.as_deref()) {
+        receipt.verdict = Verdict::NotVerified;
+        receipt.review_gap = Some(gap);
+    }
     receipt.requirements = requirement_states(
         &load_specs(root),
         &rows,
@@ -256,6 +263,9 @@ pub fn render_text(receipt: &Receipt) -> String {
         None => out.push_str(&format!("  {}\n", not_verified_hint(receipt))),
     }
     out.push_str(&requirements_text(&receipt.requirements));
+    if let Some(gap) = &receipt.review_gap {
+        out.push_str(&format!("  review:    {gap}\n"));
+    }
     if !receipt.protected_changes.is_empty() {
         out.push_str(&format!(
             "  checks changed since last commit: {}\n",

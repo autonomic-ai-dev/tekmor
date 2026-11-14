@@ -132,6 +132,24 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
+            if sub == "review" {
+                let cwd = std::env::current_dir()?;
+                let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
+                let verdict = flag_value(&args, "--verdict").unwrap_or_default();
+                let reviewer = flag_value(&args, "--reviewer").unwrap_or_default();
+                let notes = flag_value(&args, "--notes").unwrap_or_default();
+                if !matches!(verdict.as_str(), "pass" | "fail") || reviewer.is_empty() {
+                    eprintln!("usage: tekmor verify review --verdict pass|fail --reviewer NAME [--notes TEXT]");
+                    std::process::exit(2);
+                }
+                let Some(hash) = tekmor::verify::code_tree_hash(&root) else {
+                    eprintln!("not a git repository: cannot bind a review to the tree");
+                    std::process::exit(2);
+                };
+                let path = tekmor::review::record(&root, &hash, &verdict, &reviewer, &notes)?;
+                println!("recorded {verdict} review at {}", path.display());
+                return Ok(());
+            }
             if sub == "ratchet" {
                 let cwd = std::env::current_dir()?;
                 let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
