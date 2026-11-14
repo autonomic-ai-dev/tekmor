@@ -24,6 +24,7 @@ const STATE_FILE: &str = "stop-gate-state.json";
 pub struct StopInput {
     pub cwd: Option<String>,
     pub session_id: Option<String>,
+    pub transcript_path: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -200,10 +201,28 @@ fn load_evidence(store: &BrainStore, root: &Path) -> Result<Vec<Evidence>> {
         .collect())
 }
 
+fn claim_gap(store: &BrainStore, root: &Path, transcript: Option<&str>) -> Option<String> {
+    let text = crate::claims::last_assistant_text(Path::new(transcript?))?;
+    if !crate::claims::claims_passing(&text) {
+        return None;
+    }
+    let changed = changed_paths(root)
+        .iter()
+        .any(|path| verify::is_code_path(path) || verify::is_proof_input(path));
+    if !changed {
+        return None;
+    }
+    let receipt = crate::receipt::receipt_for_project(store, root).ok()?;
+    (receipt.verdict != crate::receipt::Verdict::Passed).then(|| {
+        "Your last message says the checks pass, but the receipt for this code is not PASSED. Run `tekmor verify -- <cmd>` on the current code, or correct the claim.".to_string()
+    })
+}
+
 pub fn run_stop_gate() -> Result<()> {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw)?;
     let input: StopInput = serde_json::from_str(&raw).unwrap_or_default();
+    let transcript = input.transcript_path.clone();
     let cwd = input
         .cwd
         .map(PathBuf::from)
@@ -218,7 +237,10 @@ pub fn run_stop_gate() -> Result<()> {
     let mode = AgentBrainSettings::load(&config.home).gates.stop;
     let repo_state =
         state_file.with_file_name(format!("stop-gate-state-{}.json", repo_name(&root)));
-    let outcome = evaluate_stop(&store, &root, &session_id, &repo_state, mode)?;
+    let outcome = match evaluate_stop(&store, &root, &session_id, &repo_state, mode)? {
+        StopOutcome::Clear => claim_gap(&store, &root, transcript.as_deref()).map_or(StopOutcome::Clear, StopOutcome::Block),
+        other => other,
+    };
     if let Some((kind, detail)) = gate_event(&outcome, mode, &root) {
         if let Err(err) =
             crate::gate_events::record(&config.logs_dir.join("gate-events.jsonl"), kind, &detail)
@@ -722,6 +744,15 @@ mod tests {
             None
         );
         assert!(store.list_verify_outcomes(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn code_tree_hash_moves_on_any_non_doc_file() {
+        let dir = TempDir::new().unwrap();
+        edited_repo(dir.path(), None);
+        let before = verify::code_tree_hash(dir.path()).unwrap();
+        fs::write(dir.path().join(".pass"), "").unwrap();
+        assert_ne!(verify::code_tree_hash(dir.path()).unwrap(), before);
     }
 
     #[test]

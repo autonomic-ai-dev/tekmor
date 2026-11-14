@@ -752,6 +752,15 @@ pub fn is_code_path(path: &str) -> bool {
         || file == "build.rs"
 }
 
+fn counts_toward_tree(path: &str) -> bool {
+    let doc = [".md", ".txt", ".rst"].iter().any(|ext| path.ends_with(ext));
+    let ignored = path.starts_with(".verify/artifacts/")
+        || path.starts_with(".verify/features/")
+        || path.starts_with(".verify/knowledge-base/")
+        || path.starts_with(".claude/");
+    !doc && !ignored
+}
+
 pub fn is_proof_input(path: &str) -> bool {
     path == ".verify/verify.toml" || path == ".verify/run.sh" || path.starts_with(".verify/checks/")
 }
@@ -770,7 +779,7 @@ pub fn code_tree_hash(root: &Path) -> Option<String> {
         .lines()
         .filter_map(|line| line.get(3..))
         .filter_map(|path| path.rsplit(" -> ").next())
-        .filter(|path| is_code_path(path) || is_proof_input(path))
+        .filter(|path| counts_toward_tree(path))
         .map(str::to_string)
         .collect();
     paths.sort();
