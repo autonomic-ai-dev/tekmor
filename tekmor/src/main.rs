@@ -224,6 +224,27 @@ async fn main() -> Result<()> {
                     std::process::exit(report.exit_code);
                 }
             } else {
+                if let Some(n) = flag_value(&args, "--repeat").and_then(|v| v.parse::<u32>().ok()) {
+                    let exe = std::env::current_exe()?;
+                    let mut rest = Vec::new();
+                    let mut i = 2;
+                    while i < args.len() {
+                        if args[i] == "--repeat" {
+                            i += 2;
+                            continue;
+                        }
+                        rest.push(args[i].clone());
+                        i += 1;
+                    }
+                    let mut all_ok = true;
+                    for _ in 0..n {
+                        all_ok &= std::process::Command::new(&exe).arg("verify").args(&rest).status()?.success();
+                    }
+                    if !all_ok {
+                        std::process::exit(1);
+                    }
+                    return Ok(());
+                }
                 let route_log_id = flag_value(&args, "--route-log-id");
                 let cause = flag_value(&args, "--cause");
                 let config_path = flag_value(&args, "--config").map(std::path::PathBuf::from);

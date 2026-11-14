@@ -20,6 +20,24 @@ impl EvidenceRecord {
     }
 }
 
+pub fn flaky_commands(records: &[EvidenceRecord], head: &str, hash: &str) -> Vec<String> {
+    let mut flaky: Vec<String> = records
+        .iter()
+        .filter(|r| r.is_run_for(head, hash))
+        .filter(|r| {
+            records.iter().any(|other| {
+                other.is_run_for(head, hash)
+                    && other.cmd == r.cmd
+                    && (other.exit_code == 0) != (r.exit_code == 0)
+            })
+        })
+        .map(|r| r.cmd.clone())
+        .collect();
+    flaky.sort();
+    flaky.dedup();
+    flaky
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,5 +153,41 @@ mod summary_tests {
     #[test]
     fn no_records_gives_no_summaries() {
         assert!(summarize(&[]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod flaky_tests {
+    use super::*;
+
+    fn run(cmd: &str, exit_code: i32, head: &str, hash: &str) -> EvidenceRecord {
+        EvidenceRecord {
+            id: format!("{cmd}-{exit_code}"),
+            cmd: cmd.into(),
+            exit_code,
+            recorded_at: 1,
+            source: Some("cli".into()),
+            code_hash: Some(hash.into()),
+            head_sha: Some(head.into()),
+            verify_config_hash: None,
+        }
+    }
+
+    #[test]
+    fn a_command_with_mixed_outcomes_on_the_same_tree_is_flaky() {
+        let records = [run("cargo test", 0, "h", "c"), run("cargo test", 1, "h", "c")];
+        assert_eq!(flaky_commands(&records, "h", "c"), ["cargo test"]);
+    }
+
+    #[test]
+    fn a_command_that_always_gives_the_same_result_is_not_flaky() {
+        let records = [run("cargo test", 0, "h", "c"), run("cargo test", 0, "h", "c")];
+        assert!(flaky_commands(&records, "h", "c").is_empty());
+    }
+
+    #[test]
+    fn runs_for_another_tree_do_not_make_a_command_flaky() {
+        let records = [run("cargo test", 0, "h", "c"), run("cargo test", 1, "h", "other")];
+        assert!(flaky_commands(&records, "h", "c").is_empty());
     }
 }

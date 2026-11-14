@@ -63,11 +63,24 @@ fn proof_line(cmd: &str, code_hash: Option<&str>) -> String {
 }
 
 fn passing_run<'a>(code_hash: &str, evidence: &'a [Evidence]) -> Option<&'a Evidence> {
-    evidence.iter().find(|e| {
-        e.exit_code == 0
+    let counted = |e: &&Evidence| {
+        e.code_hash.as_deref() == Some(code_hash)
             && matches!(e.source.as_deref(), Some("cli" | "orchestrator"))
-            && e.code_hash.as_deref() == Some(code_hash)
-    })
+    };
+    let flaky: Vec<&str> = evidence
+        .iter()
+        .filter(counted)
+        .filter(|r| {
+            evidence
+                .iter()
+                .filter(counted)
+                .any(|o| o.cmd == r.cmd && (o.exit_code == 0) != (r.exit_code == 0))
+        })
+        .map(|r| r.cmd.as_str())
+        .collect();
+    evidence
+        .iter()
+        .find(|e| e.exit_code == 0 && counted(e) && !flaky.contains(&e.cmd.as_str()))
 }
 
 pub fn decide(verified: bool, blocks_so_far: u32) -> Decision {
@@ -377,6 +390,18 @@ mod tests {
     fn blocks_run_recorded_for_another_tree() {
         let ev = [evidence(0, Some("cli"), Some("old-tree"))];
         assert!(passing_run("new-tree", &ev).is_none());
+    }
+
+    #[test]
+    fn a_flaky_command_is_not_a_passing_run() {
+        let run = |exit_code| Evidence {
+            cmd: "cargo test".into(),
+            exit_code,
+            source: Some("cli".into()),
+            code_hash: Some("tree".into()),
+        };
+        assert!(passing_run("tree", &[run(0), run(1)]).is_none());
+        assert!(passing_run("tree", &[run(0), run(0)]).is_some());
     }
 
     #[test]
