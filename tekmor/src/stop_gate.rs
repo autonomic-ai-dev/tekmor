@@ -688,6 +688,15 @@ mod tests {
     }
 
     #[test]
+    fn code_tree_hash_moves_on_proof_input_edits() {
+        let dir = TempDir::new().unwrap();
+        edited_repo(dir.path(), Some("[verify]\ncommands = [\"true\"]\n"));
+        let before = verify::code_tree_hash(dir.path()).unwrap();
+        fs::write(dir.path().join(".verify/verify.toml"), "[verify]\ncommands = [\"true\", \"echo ok\"]\n").unwrap();
+        assert_ne!(verify::code_tree_hash(dir.path()).unwrap(), before);
+    }
+
+    #[test]
     fn code_tree_hash_moves_on_code_edits_and_not_on_doc_edits() {
         let dir = TempDir::new().unwrap();
         edited_repo(dir.path(), None);

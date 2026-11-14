@@ -752,6 +752,10 @@ pub fn is_code_path(path: &str) -> bool {
         || file == "build.rs"
 }
 
+fn is_proof_input(path: &str) -> bool {
+    path == ".verify/verify.toml" || path == ".verify/run.sh" || path.starts_with(".verify/checks/")
+}
+
 pub fn code_tree_hash(root: &Path) -> Option<String> {
     let out = std::process::Command::new("git")
         .arg("-C")
@@ -766,7 +770,7 @@ pub fn code_tree_hash(root: &Path) -> Option<String> {
         .lines()
         .filter_map(|line| line.get(3..))
         .filter_map(|path| path.rsplit(" -> ").next())
-        .filter(|path| is_code_path(path))
+        .filter(|path| is_code_path(path) || is_proof_input(path))
         .map(str::to_string)
         .collect();
     paths.sort();
