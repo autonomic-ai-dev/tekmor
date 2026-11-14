@@ -103,6 +103,29 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
+            if sub == "drift" {
+                let cwd = std::env::current_dir()?;
+                let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
+                let drift = tekmor::drift::check(&root);
+                for d in &drift {
+                    println!("{}: {}", d.feature, d.problem);
+                }
+                if drift.is_empty() {
+                    println!("no drift: feature maps match the code and the allowlist");
+                } else {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+            if sub == "ratchet" {
+                let cwd = std::env::current_dir()?;
+                let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
+                let ok = tekmor::ratchet::run(&root, args.iter().any(|a| a == "--update"))?;
+                if !ok {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
             if sub == "summary" {
                 let summaries = tekmor_core::evidence::summarize(
                     &tekmor::evidence_reader::recent_runs(&store, 500)?,

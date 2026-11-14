@@ -752,7 +752,7 @@ pub fn is_code_path(path: &str) -> bool {
         || file == "build.rs"
 }
 
-fn is_proof_input(path: &str) -> bool {
+pub fn is_proof_input(path: &str) -> bool {
     path == ".verify/verify.toml" || path == ".verify/run.sh" || path.starts_with(".verify/checks/")
 }
 

@@ -288,7 +288,7 @@ fn evaluate_stop(
     let gap = feature_gap(root);
     let code_changed = changed_paths(root)
         .iter()
-        .any(|path| verify::is_code_path(path));
+        .any(|path| verify::is_code_path(path) || verify::is_proof_input(path));
     let evidence = load_evidence(store, root)?;
     let proof = code_changed
         .then(|| verify::code_tree_hash(root))
@@ -473,6 +473,18 @@ mod tests {
         if let Some(body) = verify_toml {
             fs::create_dir_all(dir.join(".verify")).unwrap();
             fs::write(dir.join(".verify/verify.toml"), body).unwrap();
+            Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "add", ".verify/verify.toml"])
+                .status()
+                .unwrap();
+            Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "baseline"])
+                .status()
+                .unwrap();
         }
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/changed.rs"), b"fn changed() {}").unwrap();
@@ -705,6 +717,27 @@ mod tests {
         assert_eq!(verify::code_tree_hash(dir.path()).unwrap(), before);
         fs::write(dir.path().join("src/changed.rs"), b"fn edited() {}").unwrap();
         assert_ne!(verify::code_tree_hash(dir.path()).unwrap(), before);
+    }
+
+    #[test]
+    fn a_proof_input_edit_forces_a_fresh_run() {
+        let dir = TempDir::new().unwrap();
+        let aux = TempDir::new().unwrap();
+        let store = gate_store(aux.path());
+        edited_repo(
+            dir.path(),
+            Some("[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
+        );
+        let state = aux.path().join("state.json");
+        assert_eq!(block_reason(&store, dir.path(), "s1", &state).unwrap(), None);
+        assert_eq!(store.list_verify_outcomes(10).unwrap().len(), 1);
+        fs::write(
+            dir.path().join(".verify/verify.toml"),
+            "[verify]\ncommands = [\"sh -c\", \"true\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
+        )
+        .unwrap();
+        assert_eq!(block_reason(&store, dir.path(), "s1", &state).unwrap(), None);
+        assert_eq!(store.list_verify_outcomes(10).unwrap().len(), 2);
     }
 
     #[test]
