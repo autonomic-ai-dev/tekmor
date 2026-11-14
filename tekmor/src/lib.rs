@@ -14,6 +14,7 @@ pub mod project_key;
 pub mod receipt;
 pub mod ratchet;
 pub mod drift;
+pub mod check_checks;
 pub mod registry_sync;
 pub mod settings;
 pub mod spec;

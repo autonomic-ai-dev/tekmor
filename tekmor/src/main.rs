@@ -103,6 +103,21 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
+            if sub == "check-checks" {
+                let cwd = std::env::current_dir()?;
+                let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
+                let verdicts = tekmor::check_checks::run(&root)?;
+                let mut accepted = true;
+                for v in &verdicts {
+                    let mark = if v.caught { "caught" } else { "NOT CAUGHT" };
+                    println!("{mark:<10} {}", v.cmd);
+                    accepted &= v.caught;
+                }
+                if !accepted {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
             if sub == "drift" {
                 let cwd = std::env::current_dir()?;
                 let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
