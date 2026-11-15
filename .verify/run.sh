@@ -16,6 +16,8 @@ echo "==> tekmor-core boundary"
 echo "==> tekmor-core unit tests"
 cargo test -p tekmor-core
 
+cargo build -q -p tekmor
+
 echo "==> feature maps match the code and the allowlist"
 ./target/debug/tekmor verify drift
 
