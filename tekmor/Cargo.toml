@@ -1,6 +1,6 @@
 [package]
 name = "tekmor"
-version = "1.1.0-rc2"
+version = "1.0.0"
 edition = "2021"
 description = "A proof eval for coding agents: allowlisted checks, receipts and gates"
 license = "MIT"
@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 
 [dependencies]
-tekmor-core = { path = "crates/tekmor-core", version = "1.1.0-rc2" }
+tekmor-core = { path = "crates/tekmor-core", version = "1.0.0" }
 libc = "0.2"
 age = "0.11"
 anyhow = "1"
