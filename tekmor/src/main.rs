@@ -146,7 +146,8 @@ async fn main() -> Result<()> {
                     eprintln!("not a git repository: cannot bind a review to the tree");
                     std::process::exit(2);
                 };
-                let path = tekmor::review::record(&root, &hash, &verdict, &reviewer, &notes)?;
+                let config = tekmor::config::Config::load()?;
+                let path = tekmor::review::record(&root, &config.home, &hash, &verdict, &reviewer, &notes)?;
                 println!("recorded {verdict} review at {}", path.display());
                 return Ok(());
             }
