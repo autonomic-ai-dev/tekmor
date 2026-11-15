@@ -41,6 +41,28 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
   - Behaviour: `tekmor ext list|add|remove` (`extensions.rs`, `registry_sync.rs`). Extensions are kept for later use; none are bundled.
   - Outcome: The extension mechanism is present without any bundled extension.
 
+- `lint-ratchet`: Lint counts may not rise above recorded baselines.
+  - Behaviour: `tekmor verify ratchet` counts each rule's matches in tracked files (`ratchet.rs`, rules in `.verify/ratchet.toml`). `--update` lowers baselines only.
+  - Outcome: A new violation fails the command, and the baseline only goes down.
+- `drift-report`: Feature maps must point at code and checks that still exist.
+  - Behaviour: `tekmor verify drift` checks each map's code paths and verification commands (`drift.rs`).
+  - Outcome: Stale maps are named and the command exits 1.
+- `check-checks`: Every allowlisted check must fail on a broken copy.
+  - Behaviour: `tekmor verify check-checks` runs each check on a copy overlaid with `.verify/broken/` (`check_checks.rs`).
+  - Outcome: A check that still passes on the broken copy is reported as not caught.
+- `signed-review`: Risky paths need an independent pass review for the current tree.
+  - Behaviour: `tekmor verify review` writes an HMAC-signed record; the receipt requires a valid pass record when a path in `.verify/review.toml` changed (`review.rs`). The key is in the macOS Keychain, or under the tekmor home elsewhere.
+  - Outcome: A hand-written or edited record fails. Limitation: a session that can read the key can still sign.
+- `flaky-detection`: Repeat runs that disagree are not proof.
+  - Behaviour: `tekmor verify --repeat N -- <cmd>`. `flaky_commands` in `tekmor-core` marks a command with mixed outcomes on one tree, and the receipt and the stop gate ignore it.
+  - Outcome: The receipt lists the flaky command.
+- `claim-reconciliation`: A pass claim needs a PASSED receipt.
+  - Behaviour: the stop gate reads the last assistant message from the transcript (`claims.rs`) and blocks a pass claim without a PASSED receipt, in any repo with an allowlist.
+  - Outcome: Limitation: the detector is a pattern match on the message text.
+- `blackbox-check`: The built binary works end to end.
+  - Behaviour: `.verify/checks/blackbox.sh` runs the binary through a temporary repo and home.
+  - Outcome: Runs in `.verify/run.sh`.
+
 ## Code
 
 - `tekmor/src/verify.rs`
@@ -64,6 +86,11 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
 - `tekmor/src/db/migrations.rs`
 - `tekmor/src/main.rs`
 - `tekmor/src/cli_help.rs`
+- `tekmor/src/ratchet.rs`
+- `tekmor/src/drift.rs`
+- `tekmor/src/check_checks.rs`
+- `tekmor/src/review.rs`
+- `tekmor/src/claims.rs`
 - `tekmor/src/lib.rs`
 
 ## How to get to it (user POV)
