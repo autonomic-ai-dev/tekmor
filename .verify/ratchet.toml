@@ -1,0 +1,11 @@
+[[rule]]
+name = "no-unwrap-in-binary"
+pattern = '\.unwrap\(\)'
+paths = ["tekmor/src"]
+baseline = 332
+
+[[rule]]
+name = "no-todo-markers"
+pattern = "TODO|FIXME"
+paths = ["tekmor/src", "tekmor/crates"]
+baseline = 0
