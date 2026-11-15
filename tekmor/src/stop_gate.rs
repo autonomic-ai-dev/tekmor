@@ -209,7 +209,7 @@ fn claim_gap(store: &BrainStore, root: &Path, transcript: Option<&str>) -> Optio
     let changed = changed_paths(root)
         .iter()
         .any(|path| verify::is_code_path(path) || verify::is_proof_input(path));
-    if !changed {
+    if !changed && !root.join(".verify/verify.toml").is_file() {
         return None;
     }
     let receipt = crate::receipt::receipt_for_project(store, root).ok()?;
@@ -412,6 +412,21 @@ mod tests {
     fn blocks_run_recorded_for_another_tree() {
         let ev = [evidence(0, Some("cli"), Some("old-tree"))];
         assert!(passing_run("new-tree", &ev).is_none());
+    }
+
+    #[test]
+    fn a_pass_claim_without_a_receipt_is_blocked_even_when_no_code_changed() {
+        let dir = TempDir::new().unwrap();
+        let aux = TempDir::new().unwrap();
+        let store = gate_store(aux.path());
+        edited_repo(dir.path(), Some("[verify]\ncommands = [\"true\"]\n"));
+        let transcript = aux.path().join("t.jsonl");
+        fs::write(
+            &transcript,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"All tests pass."}]}}"#,
+        )
+        .unwrap();
+        assert!(claim_gap(&store, dir.path(), transcript.to_str()).is_some());
     }
 
     #[test]

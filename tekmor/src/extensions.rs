@@ -75,12 +75,6 @@ pub fn load_manifest(home: &Path, name: &str) -> Result<Manifest> {
     Ok(manifest)
 }
 
-fn read_installed_manifest(home: &Path, name: &str) -> Result<Manifest> {
-    let path = manifest_path(home, name);
-    let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    serde_json::from_str(&raw).with_context(|| format!("parse {}", path.display()))
-}
-
 pub fn current_target() -> Result<&'static str> {
     match (std::env::consts::ARCH, std::env::consts::OS) {
         ("aarch64", "macos") => Ok("aarch64-apple-darwin"),
@@ -187,19 +181,6 @@ pub fn installed(home: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
-pub fn owner_of(home: &Path, command: &str) -> Result<Option<String>> {
-    for name in installed(home)? {
-        if read_installed_manifest(home, &name)?
-            .subcommands
-            .iter()
-            .any(|sub| sub == command)
-        {
-            return Ok(Some(name));
-        }
-    }
-    Ok(None)
-}
-
 pub fn remove(home: &Path, name: &str) -> Result<()> {
     validate_name(name)?;
     let binary = binary_path(home, name);
@@ -213,15 +194,6 @@ pub fn remove(home: &Path, name: &str) -> Result<()> {
         }
     }
     Ok(())
-}
-
-pub fn run(home: &Path, name: &str, args: &[String]) -> Result<i32> {
-    let status = Command::new(binary_path(home, name))
-        .args(args)
-        .env("TEKMOR_HOME", home)
-        .status()
-        .with_context(|| format!("run extension `{name}`"))?;
-    Ok(status.code().unwrap_or(1))
 }
 
 #[cfg(test)]
@@ -308,17 +280,6 @@ mod tests {
             installed(home.path()).unwrap(),
             vec!["graph".to_string(), "sample".to_string()]
         );
-    }
-
-    #[test]
-    fn owner_of_finds_the_extension_that_provides_a_subcommand() {
-        let home = tempdir().unwrap();
-        record_installed(home.path(), "sample", &["sample", "proofs"]);
-        assert_eq!(
-            owner_of(home.path(), "proofs").unwrap(),
-            Some("sample".to_string())
-        );
-        assert_eq!(owner_of(home.path(), "nosuch").unwrap(), None);
     }
 
     #[test]

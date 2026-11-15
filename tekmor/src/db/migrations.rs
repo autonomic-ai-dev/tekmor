@@ -8,7 +8,6 @@ const VERIFY_COLUMNS: &[(&str, &str)] = &[
     ("code_hash", "TEXT"),
     ("source", "TEXT NOT NULL DEFAULT 'cli'"),
     ("project_key", "TEXT"),
-    ("tests_run", "INTEGER"),
 ];
 
 pub fn run(conn: &Connection) -> rusqlite::Result<()> {
