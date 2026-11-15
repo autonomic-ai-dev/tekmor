@@ -35,3 +35,13 @@ tekmor is a proof eval for coding agents.
 
 - The MCP server, daemon, proxy, route tool and route gate.
 - Retrieval, memory, lessons, trajectories, packages, upstream MCP servers, sync, Memorable, graphify, dashboard, stats, token tools and suggest-memory.
+
+### Known limits
+
+- A session that can read the review key can sign a review. The Keychain blocks the shell path, not the Read tool. Keep this in mind before relying on review records.
+- The claim check is a pattern match on the last assistant message. It can miss a claim worded differently and can flag a true sentence.
+- Runs recorded before 1.0.0 are not valid receipts after upgrade, because the tree hash now covers more files. Run the checks again.
+- The migration was tested on one real version-29 database and on in-memory databases. Other databases are untested.
+- Hooks embed the absolute path of the binary. Moving or rebuilding the binary can break them until `tekmor install` runs again.
+- The harness pilot shows the stop gate changed the agent's documentation edits and roughly doubled its turns. It did not show a proof benefit: no tekmor-arm run recorded a receipt. Results are on two toy tasks, three repetitions each. They are not evidence about your own work.
+- The published binary is arm64 macOS only.

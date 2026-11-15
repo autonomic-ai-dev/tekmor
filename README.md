@@ -15,12 +15,31 @@ A proof eval for coding agents. tekmor runs the checks a project allowlists, rec
 
 ## Install
 
+Homebrew (macOS, Apple Silicon):
+
+```
+brew tap autonomic-ai-dev/tap
+brew install tekmor
+```
+
+crates.io (any platform with Rust):
+
+```
+cargo install tekmor
+```
+
+From source:
+
 ```
 cargo build --release -p tekmor
+```
+
+Then register the gates in Claude Code. The hooks record the binary's absolute path, so run this again if the binary moves:
+
+```
 tekmor install            # registers the gates in .claude/settings.json
 tekmor install --global   # registers them in ~/.claude/settings.json
 ```
-
 ## Use
 
 ```
