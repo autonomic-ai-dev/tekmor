@@ -2,7 +2,7 @@
 
 The release history starts at v1.0.0-rc1. Earlier history is in git.
 
-## v1.0.0-rc1 (not yet tagged)
+## [1.0.0-rc1]
 
 tekmor is a proof eval for coding agents.
 
