@@ -133,7 +133,7 @@ const SCRIPT_DEPTH: u8 = 3;
 const SCRIPT_SIZE_LIMIT: u64 = 256 * 1024;
 
 pub fn classify(command: &str, root: Option<&Path>, rules: &[Rule]) -> Verdict {
-    if command.contains("review.key") || command.contains("artifacts/reviews") {
+    if ["review.key", "tekmor-review-key", "artifacts/reviews", "find-generic-password", "dump-keychain"].iter().any(|s| command.contains(s)) {
         return Verdict::Block("review records and their key are written only by tekmor verify review".into());
     }
     let ctx = Ctx {

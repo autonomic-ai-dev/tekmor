@@ -192,8 +192,8 @@ pub fn receipt_for_project(store: &BrainStore, root: &Path) -> Result<Receipt> {
         None => Vec::new(),
     };
     let mut receipt = build_receipt(&rows, head.as_deref(), code.as_deref());
-    let home = crate::config::Config::load()?.home;
-    if let Some(gap) = crate::review::gap(root, &home, code.as_deref()) {
+    let store = crate::review::default_store(&crate::config::Config::load()?.home);
+    if let Some(gap) = crate::review::gap(root, &store, code.as_deref()) {
         receipt.verdict = Verdict::NotVerified;
         receipt.review_gap = Some(gap);
     }

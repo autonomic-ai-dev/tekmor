@@ -147,7 +147,8 @@ async fn main() -> Result<()> {
                     std::process::exit(2);
                 };
                 let config = tekmor::config::Config::load()?;
-                let path = tekmor::review::record(&root, &config.home, &hash, &verdict, &reviewer, &notes)?;
+                let store = tekmor::review::default_store(&config.home);
+                let path = tekmor::review::record(&root, &store, &hash, &verdict, &reviewer, &notes)?;
                 println!("recorded {verdict} review at {}", path.display());
                 return Ok(());
             }
