@@ -24,6 +24,9 @@ echo "==> feature maps match the code and the allowlist"
 echo "==> lint ratchet"
 ./target/debug/tekmor verify ratchet
 
+echo "==> black-box check of the built binary"
+sh .verify/checks/blackbox.sh
+
 echo "==> tekmor tests"
 cargo test -p tekmor -- --test-threads=1
 

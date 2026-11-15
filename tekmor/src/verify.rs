@@ -753,7 +753,7 @@ pub fn is_code_path(path: &str) -> bool {
 }
 
 fn counts_toward_tree(path: &str) -> bool {
-    let doc = [".md", ".txt", ".rst"].iter().any(|ext| path.ends_with(ext));
+    let doc = [".md", ".rst"].iter().any(|ext| path.ends_with(ext));
     let ignored = path.starts_with(".verify/artifacts/")
         || path.starts_with(".verify/features/")
         || path.starts_with(".verify/knowledge-base/")

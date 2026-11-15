@@ -769,7 +769,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         edited_repo(dir.path(), None);
         let before = verify::code_tree_hash(dir.path()).unwrap();
-        fs::write(dir.path().join("changed.txt"), b"doc edit").unwrap();
+        fs::write(dir.path().join("changed.md"), b"doc edit").unwrap();
         assert_eq!(verify::code_tree_hash(dir.path()).unwrap(), before);
         fs::write(dir.path().join("src/changed.rs"), b"fn edited() {}").unwrap();
         assert_ne!(verify::code_tree_hash(dir.path()).unwrap(), before);
