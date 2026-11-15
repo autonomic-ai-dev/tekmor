@@ -1,0 +1,167 @@
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+
+pub const RATCHET_FILE: &str = ".verify/ratchet.toml";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rule {
+    pub name: String,
+    pub pattern: String,
+    #[serde(default)]
+    pub paths: Vec<String>,
+    pub baseline: usize,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct RatchetFile {
+    #[serde(default, rename = "rule")]
+    pub rules: Vec<Rule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reading {
+    pub name: String,
+    pub count: usize,
+    pub baseline: usize,
+}
+
+impl Reading {
+    pub fn passes(&self) -> bool {
+        self.count <= self.baseline
+    }
+}
+
+pub fn load(root: &Path) -> Result<RatchetFile> {
+    let path = root.join(RATCHET_FILE);
+    if !path.is_file() {
+        return Ok(RatchetFile::default());
+    }
+    let raw = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    toml::from_str(&raw).with_context(|| format!("invalid {RATCHET_FILE}"))
+}
+
+fn tracked_files(root: &Path) -> Result<Vec<String>> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files"])
+        .output()
+        .context("list tracked files")?;
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect())
+}
+
+pub fn read(root: &Path, file: &RatchetFile) -> Result<Vec<Reading>> {
+    let files = tracked_files(root)?;
+    file.rules
+        .iter()
+        .map(|rule| {
+            let re = regex::Regex::new(&rule.pattern)
+                .with_context(|| format!("rule {} has an invalid pattern", rule.name))?;
+            let count = files
+                .iter()
+                .filter(|path| rule.paths.is_empty() || rule.paths.iter().any(|p| path.starts_with(p.as_str())))
+                .filter_map(|path| std::fs::read_to_string(root.join(path)).ok())
+                .map(|text| re.find_iter(&text).count())
+                .sum();
+            Ok(Reading {
+                name: rule.name.clone(),
+                count,
+                baseline: rule.baseline,
+            })
+        })
+        .collect()
+}
+
+pub fn lowered(file: &RatchetFile, readings: &[Reading]) -> RatchetFile {
+    RatchetFile {
+        rules: file
+            .rules
+            .iter()
+            .map(|rule| {
+                let count = readings
+                    .iter()
+                    .find(|r| r.name == rule.name)
+                    .map_or(rule.baseline, |r| r.count);
+                Rule {
+                    baseline: count.min(rule.baseline),
+                    ..rule.clone()
+                }
+            })
+            .collect(),
+    }
+}
+
+pub fn run(root: &Path, update: bool) -> Result<bool> {
+    let file = load(root)?;
+    let readings = read(root, &file)?;
+    for r in &readings {
+        let verdict = if r.passes() { "ok" } else { "over baseline" };
+        println!("{:<32} {:>6} / baseline {:<6} {verdict}", r.name, r.count, r.baseline);
+    }
+    let ok = readings.iter().all(Reading::passes);
+    if update {
+        let lowered = lowered(&file, &readings);
+        let text = toml::to_string(&lowered).context("serialize ratchet")?;
+        std::fs::write(root.join(RATCHET_FILE), text).with_context(|| format!("write {RATCHET_FILE}"))?;
+        println!("baselines lowered where counts went down; never raised");
+    }
+    Ok(ok)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rule(pattern: &str, baseline: usize) -> Rule {
+        Rule {
+            name: "r".into(),
+            pattern: pattern.into(),
+            paths: vec![],
+            baseline,
+        }
+    }
+
+    #[test]
+    fn a_count_at_or_below_the_baseline_passes() {
+        assert!(Reading { name: "r".into(), count: 2, baseline: 2 }.passes());
+        assert!(Reading { name: "r".into(), count: 1, baseline: 2 }.passes());
+    }
+
+    #[test]
+    fn a_count_above_the_baseline_fails() {
+        assert!(!Reading { name: "r".into(), count: 3, baseline: 2 }.passes());
+    }
+
+    #[test]
+    fn lowering_never_raises_a_baseline() {
+        let file = RatchetFile { rules: vec![rule("x", 5)] };
+        let up = [Reading { name: "r".into(), count: 9, baseline: 5 }];
+        assert_eq!(lowered(&file, &up).rules[0].baseline, 5);
+        let down = [Reading { name: "r".into(), count: 2, baseline: 5 }];
+        assert_eq!(lowered(&file, &down).rules[0].baseline, 2);
+    }
+
+    #[test]
+    fn counts_matches_across_tracked_files_only() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::process::Command::new("git").arg("-C").arg(dir.path()).args(["init", "-q"]).status().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "x.unwrap(); y.unwrap();").unwrap();
+        std::fs::write(dir.path().join("untracked.rs"), "z.unwrap();").unwrap();
+        std::process::Command::new("git").arg("-C").arg(dir.path()).args(["add", "a.rs"]).status().unwrap();
+        let file = RatchetFile { rules: vec![rule(r"\.unwrap\(\)", 0)] };
+        let readings = read(dir.path(), &file).unwrap();
+        assert_eq!(readings[0].count, 2);
+    }
+
+    #[test]
+    fn an_invalid_pattern_is_an_error_not_a_pass() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = RatchetFile { rules: vec![rule("(", 0)] };
+        assert!(read(dir.path(), &file).is_err());
+    }
+}

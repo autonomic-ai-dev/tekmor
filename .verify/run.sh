@@ -16,6 +16,17 @@ echo "==> tekmor-core boundary"
 echo "==> tekmor-core unit tests"
 cargo test -p tekmor-core
 
+cargo build -q -p tekmor
+
+echo "==> feature maps match the code and the allowlist"
+./target/debug/tekmor verify drift
+
+echo "==> lint ratchet"
+./target/debug/tekmor verify ratchet
+
+echo "==> black-box check of the built binary"
+bash .verify/checks/blackbox.sh
+
 echo "==> tekmor tests"
 cargo test -p tekmor -- --test-threads=1
 

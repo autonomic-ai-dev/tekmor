@@ -13,8 +13,6 @@ use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
 use crate::db::store::BrainStore;
-use crate::evidence_reader;
-use crate::types::{VerificationStatus, VerifiedRecipe};
 
 pub const VERIFY_DIR_NAME: &str = ".verify";
 
@@ -30,10 +28,6 @@ impl VerifySource {
             Self::Cli => "cli",
             Self::Orchestrator => "orchestrator",
         }
-    }
-
-    pub fn is_trusted_for_learning(self) -> bool {
-        matches!(self, Self::Cli | Self::Orchestrator)
     }
 
     pub fn parse(s: &str) -> Result<Self> {
@@ -173,14 +167,6 @@ fn output_tail(output: &str) -> String {
     String::from_utf8_lossy(&bytes[start..]).into_owned()
 }
 
-pub fn count_tests(output: &str) -> Option<u64> {
-    output
-        .lines()
-        .filter_map(|line| line.trim_start().strip_prefix("test result:"))
-        .filter_map(|rest| rest.split_whitespace().nth(1)?.parse::<u64>().ok())
-        .reduce(|total, n| total + n)
-}
-
 #[derive(Debug)]
 pub struct StepRun {
     pub report: VerifyReport,
@@ -219,23 +205,6 @@ pub fn run_default_step(
         report,
         output: output_tail(&output),
     }))
-}
-
-pub fn run_project_verify(store: &BrainStore, project: &Path) -> Result<serde_json::Value> {
-    let root = crate::config::find_repo_root(project).unwrap_or_else(|| project.to_path_buf());
-    match run_default_step(store, &root, VerifySource::Cli)? {
-        None => Ok(serde_json::json!({
-            "ran": false,
-            "project": root.display().to_string(),
-            "reason": "no [verify.default] step declared"
-        })),
-        Some(run) => Ok(serde_json::json!({
-            "ran": true,
-            "project": root.display().to_string(),
-            "verify": run.report,
-            "output": run.output
-        })),
-    }
 }
 
 /// Load project command allowlist from `<root>/.verify/verify.toml` or `<root>/verify.toml`.
@@ -406,7 +375,6 @@ pub fn record_from_result(
             store.set_verify_outcome_head_sha(&id, &sha)?;
         }
     }
-
 
     Ok(VerifyReport {
         id,
@@ -679,9 +647,6 @@ pub fn run_verify(store: &BrainStore, cmd: &[String], run: VerifyRun<'_>) -> Res
             source,
         },
     )?;
-    if let Some(tests_run) = count_tests(&output) {
-        store.set_verify_outcome_tests_run(&report.id, tests_run)?;
-    }
     if save_artifact {
         let path = save_artifact_log(
             &artifacts_dir(),
@@ -733,7 +698,6 @@ fn save_artifact_log(
     Ok(path)
 }
 
-
 fn hash_path(path: &Path) -> Result<String> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     Ok(format!("{:x}", Sha256::digest(&bytes)))
@@ -752,6 +716,19 @@ pub fn is_code_path(path: &str) -> bool {
         || file == "build.rs"
 }
 
+fn counts_toward_tree(path: &str) -> bool {
+    let doc = [".md", ".rst"].iter().any(|ext| path.ends_with(ext));
+    let ignored = path.starts_with(".verify/artifacts/")
+        || path.starts_with(".verify/features/")
+        || path.starts_with(".verify/knowledge-base/")
+        || path.starts_with(".claude/");
+    !doc && !ignored
+}
+
+pub fn is_proof_input(path: &str) -> bool {
+    path == ".verify/verify.toml" || path == ".verify/run.sh" || path.starts_with(".verify/checks/")
+}
+
 pub fn code_tree_hash(root: &Path) -> Option<String> {
     let out = std::process::Command::new("git")
         .arg("-C")
@@ -766,7 +743,7 @@ pub fn code_tree_hash(root: &Path) -> Option<String> {
         .lines()
         .filter_map(|line| line.get(3..))
         .filter_map(|path| path.rsplit(" -> ").next())
-        .filter(|path| is_code_path(path))
+        .filter(|path| counts_toward_tree(path))
         .map(str::to_string)
         .collect();
     paths.sort();
@@ -819,122 +796,6 @@ pub fn ran_a_check(source: Option<&str>) -> bool {
     matches!(source.unwrap_or("cli"), "cli" | "orchestrator")
 }
 
-pub fn last_verification(store: &BrainStore, project_key: &str) -> Option<VerificationStatus> {
-    let row = evidence_reader::project_runs(store, project_key, 100)
-        .ok()?
-        .into_iter()
-        .find(|row| ran_a_check(row.source.as_deref()))?;
-    Some(VerificationStatus {
-        cmd: row.cmd,
-        exit_code: row.exit_code,
-        recorded_at: row.recorded_at,
-        passing: row.exit_code == 0,
-    })
-}
-
-/// Suggest high-confidence verified command recipes (exit 0) matching user intent or query keywords.
-pub fn suggest_verified_recipes(
-    store: &BrainStore,
-    user_message: &str,
-    project_key: Option<&str>,
-    limit: usize,
-) -> Vec<VerifiedRecipe> {
-    let lower = user_message.to_lowercase();
-    let has_execution_intent = [
-        "test",
-        "cargo",
-        "npm",
-        "pytest",
-        "build",
-        "run",
-        "check",
-        "clippy",
-        "verify",
-        "lint",
-        "recipe",
-        "benchmark",
-        "prove",
-        "proof",
-        "exec",
-        "compile",
-    ]
-    .iter()
-    .any(|k| lower.contains(k));
-
-    if !has_execution_intent {
-        return Vec::new();
-    }
-
-    let Some(project_key) = project_key else {
-        return Vec::new();
-    };
-    let Ok(outcomes) = evidence_reader::project_runs(store, project_key, 100) else {
-        return Vec::new();
-    };
-
-    let words: Vec<&str> = lower
-        .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
-        .filter(|w| w.len() >= 3)
-        .collect();
-
-    let mut seen_cmds = std::collections::HashSet::new();
-    let mut candidates: Vec<(i32, VerifiedRecipe)> = Vec::new();
-
-    for row in outcomes {
-        if !ran_a_check(row.source.as_deref()) {
-            continue;
-        }
-        let trimmed_cmd = row.cmd.trim().to_string();
-        if trimmed_cmd.is_empty() || seen_cmds.contains(&trimmed_cmd) {
-            continue;
-        }
-        seen_cmds.insert(trimmed_cmd.clone());
-
-        // Skip excessively large command blobs (e.g. embedded heredocs/scripts) that bloat route briefings
-        if trimmed_cmd.len() > 300 || trimmed_cmd.lines().count() > 3 {
-            continue;
-        }
-
-        // Because outcomes are ordered by recorded_at DESC, the first encounter
-        // of trimmed_cmd is its latest run. If its latest execution failed, squelch it!
-        if row.exit_code != 0 {
-            continue;
-        }
-        let cmd_lower = trimmed_cmd.to_lowercase();
-
-        let mut score = 0;
-        if has_execution_intent {
-            score += 10;
-        }
-        for word in &words {
-            if cmd_lower.contains(word) {
-                score += 20;
-            }
-        }
-
-        let src = row.source.clone().unwrap_or_else(|| "cli".to_string());
-
-        if score > 0 {
-            candidates.push((
-                score,
-                VerifiedRecipe {
-                    cmd: trimmed_cmd,
-                    exit_code: row.exit_code,
-                    source: src,
-                    recorded_at: row.recorded_at,
-                    rationale: "Previously verified exit 0 execution".to_string(),
-                },
-            ));
-        }
-    }
-
-    candidates.sort_by(|a, b| {
-        b.0.cmp(&a.0)
-            .then_with(|| b.1.recorded_at.cmp(&a.1.recorded_at))
-    });
-    candidates.into_iter().take(limit).map(|(_, r)| r).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -949,42 +810,6 @@ mod tests {
         assert!(find_verify_root(&nested).is_none());
         fs::create_dir_all(dir.path().join(".verify")).unwrap();
         assert_eq!(find_verify_root(&nested).as_deref(), Some(dir.path()));
-    }
-
-    #[test]
-    fn count_tests_sums_every_cargo_result_line() {
-        let output = "running 3 tests\ntest result: ok. 3 passed; 0 failed; 0 ignored\n\n\
-                      running 4 tests\ntest result: ok. 4 passed; 0 failed; 0 ignored\n";
-        assert_eq!(count_tests(output), Some(7));
-        assert_eq!(count_tests("no cargo summary here"), None);
-    }
-
-    #[test]
-    fn recorded_outcome_keeps_the_tests_run_count() {
-        let dir = tempdir().unwrap();
-        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
-        let report = record_from_result(
-            &store,
-            0,
-            "cargo test --all-features",
-            VerifyRecord {
-                route_log_id: None,
-                cause_tag: None,
-                config_path: None,
-                scenarios_dir: None,
-                cwd: Some(dir.path()),
-                source: VerifySource::Cli,
-            },
-        )
-        .unwrap();
-        assert_eq!(store.verify_outcome_tests_run(&report.id).unwrap(), None);
-
-        store.set_verify_outcome_tests_run(&report.id, 303).unwrap();
-
-        assert_eq!(
-            store.verify_outcome_tests_run(&report.id).unwrap(),
-            Some(303)
-        );
     }
 
     #[test]
@@ -1032,7 +857,6 @@ mod tests {
             VerifySource::parse("spine").unwrap(),
             VerifySource::Orchestrator
         );
-        assert!(VerifySource::Orchestrator.is_trusted_for_learning());
         assert!(VerifySource::parse("mcp").is_err());
     }
 
@@ -1059,41 +883,6 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         assert!(!command_is_allowlisted("true", Some(dir.path())));
         assert!(!command_is_allowlisted("echo hi", Some(dir.path())));
     }
-
-    #[test]
-    fn project_verify_reports_no_step_when_none_is_declared() {
-        let dir = tempdir().unwrap();
-        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
-        let value = run_project_verify(&store, dir.path()).unwrap();
-        assert_eq!(value["ran"], false);
-        assert!(store.list_verify_outcomes(10).unwrap().is_empty());
-    }
-
-    #[test]
-    fn project_verify_runs_and_records_a_passing_step() {
-        let dir = tempdir().unwrap();
-        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
-        write_verify_toml(
-            dir.path(),
-            "[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
-        );
-        let value = run_project_verify(&store, dir.path()).unwrap();
-        assert_eq!(value["ran"], true);
-        assert_eq!(value["verify"]["success"], true);
-        assert_eq!(store.list_verify_outcomes(10).unwrap().len(), 1);
-    }
-
-    #[test]
-    fn project_verify_refuses_a_step_outside_the_allowlist() {
-        let dir = tempdir().unwrap();
-        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
-        write_verify_toml(
-            dir.path(),
-            "[verify.default]\ncommand = [\"echo\", \"hi\"]\n",
-        );
-        assert!(run_project_verify(&store, dir.path()).is_err());
-    }
-
 
     #[test]
     fn init_verify_runs_rspec_only_when_the_gemfile_names_it() {
@@ -1141,226 +930,6 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         assert!(toml_str.contains("\"make test\""));
         assert!(toml_str.contains("\".verify/run.sh\""));
     }
-
-    #[test]
-    fn suggest_verified_recipes_ranks_exit_zero_matching_commands() {
-        let dir = tempdir().unwrap();
-        let db = dir.path().join("t.db");
-        let store = BrainStore::open(&db).unwrap();
-
-        // Insert a failed outcome and a successful outcome
-        let _ = store.insert_verify_outcome(
-            None,
-            1,
-            Some("fail"),
-            None,
-            None,
-            "cargo test --failed",
-            "dev1",
-            "cli",
-            Some("project-a"),
-        );
-        let _ = store.insert_verify_outcome(
-            None,
-            0,
-            None,
-            None,
-            None,
-            "cargo test -p tekmor",
-            "dev1",
-            "orchestrator",
-            Some("project-a"),
-        );
-        let _ = store.insert_verify_outcome(
-            None,
-            0,
-            None,
-            None,
-            None,
-            "npm test",
-            "dev1",
-            "cli",
-            Some("project-a"),
-        );
-
-        let recipes = suggest_verified_recipes(&store, "run tests for tekmor", Some("project-a"), 2);
-        assert!(!recipes.is_empty());
-        assert_eq!(recipes[0].cmd, "cargo test -p tekmor");
-        assert_eq!(recipes[0].exit_code, 0);
-        assert_eq!(recipes[0].source, "orchestrator");
-    }
-
-    #[test]
-    fn suggest_verified_recipes_needs_execution_intent() {
-        let dir = tempdir().unwrap();
-        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
-        let _ = store.insert_verify_outcome(
-            None,
-            0,
-            None,
-            None,
-            None,
-            "cargo test -p tekmor",
-            "dev1",
-            "orchestrator",
-            Some("project-a"),
-        );
-        assert!(suggest_verified_recipes(&store, "summarize the design doc", Some("project-a"), 3).is_empty());
-        assert!(!suggest_verified_recipes(&store, "run the tests", Some("project-a"), 3).is_empty());
-    }
-
-    #[test]
-    fn suggest_verified_recipes_squelches_recently_failed_commands() {
-        let dir = tempdir().unwrap();
-        let db = dir.path().join("t.db");
-        let store = BrainStore::open(&db).unwrap();
-
-        // Older successful run
-        let _ = store.insert_verify_outcome(
-            None,
-            0,
-            None,
-            None,
-            None,
-            "cargo test -p tekmor",
-            "dev1",
-            "orchestrator",
-            Some("project-a"),
-        );
-        // Latest run failed!
-        let _ = store.insert_verify_outcome(
-            None,
-            1,
-            Some("build error"),
-            None,
-            None,
-            "cargo test -p tekmor",
-            "dev1",
-            "cli",
-            Some("project-a"),
-        );
-
-        let recipes = suggest_verified_recipes(&store, "run tests for tekmor", Some("project-a"), 2);
-        assert!(
-            recipes.is_empty(),
-            "recently failed command must be squelched"
-        );
-    }
-
-    #[test]
-    fn hook_observed_commands_are_not_verification() {
-        let dir = tempdir().unwrap();
-        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
-        let _ = store.insert_verify_outcome(
-            None,
-            0,
-            None,
-            None,
-            None,
-            "cargo test --lib",
-            "dev1",
-            "cli",
-            Some("project-a"),
-        );
-        for observed in ["git add src && git status", "ls tests | grep cargo"] {
-            let _ = store.insert_verify_outcome(
-                None,
-                0,
-                None,
-                None,
-                None,
-                observed,
-                "dev1",
-                "hook",
-                Some("project-a"),
-            );
-        }
-
-        let status = last_verification(&store, "project-a").unwrap();
-        assert_eq!(status.cmd, "cargo test --lib");
-
-        let recipes = suggest_verified_recipes(&store, "run cargo test", Some("project-a"), 5);
-        let commands: Vec<&str> = recipes.iter().map(|r| r.cmd.as_str()).collect();
-        assert_eq!(commands, ["cargo test --lib"]);
-    }
-
-    #[test]
-    fn a_project_with_only_hook_observations_has_no_verification() {
-        let dir = tempdir().unwrap();
-        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
-        let _ = store.insert_verify_outcome(
-            None,
-            0,
-            None,
-            None,
-            None,
-            "ls -la",
-            "dev1",
-            "hook",
-            Some("project-a"),
-        );
-
-        assert!(last_verification(&store, "project-a").is_none());
-        assert!(suggest_verified_recipes(&store, "run ls", Some("project-a"), 5).is_empty());
-    }
-
-    #[test]
-    fn last_verification_reports_the_latest_run_for_the_project() {
-        let dir = tempdir().unwrap();
-        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
-        let _ = store.insert_verify_outcome(
-            None,
-            1,
-            Some("build error"),
-            None,
-            None,
-            "cargo test --lib",
-            "dev1",
-            "cli",
-            Some("project-a"),
-        );
-
-        let status = last_verification(&store, "project-a").unwrap();
-        assert_eq!(status.cmd, "cargo test --lib");
-        assert!(!status.passing);
-        assert!(last_verification(&store, "project-b").is_none());
-    }
-
-    #[test]
-    fn suggest_verified_recipes_only_offers_recipes_recorded_for_the_same_project() {
-        let dir = tempdir().unwrap();
-        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
-
-        let _ = store.insert_verify_outcome(
-            None,
-            0,
-            None,
-            None,
-            None,
-            "cargo test -p harbor",
-            "dev1",
-            "cli",
-            Some("project-a"),
-        );
-        let _ = store.insert_verify_outcome(
-            None,
-            0,
-            None,
-            None,
-            None,
-            "cargo test -p legacy",
-            "dev1",
-            "cli",
-            None,
-        );
-
-        assert!(suggest_verified_recipes(&store, "run tests", Some("project-b"), 3).is_empty());
-        assert!(suggest_verified_recipes(&store, "run tests", None, 3).is_empty());
-        let recipes = suggest_verified_recipes(&store, "run tests", Some("project-a"), 3);
-        assert_eq!(recipes.len(), 1);
-        assert_eq!(recipes[0].cmd, "cargo test -p harbor");
-    }
-
 
     #[test]
     fn save_artifact_log_files_output_under_project_name() {

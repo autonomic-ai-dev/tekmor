@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -25,12 +25,6 @@ impl Config {
         })
     }
 
-    pub fn ensure_dirs(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.home).context("create home dir")?;
-        std::fs::create_dir_all(&self.data_dir).context("create data dir")?;
-        std::fs::create_dir_all(&self.logs_dir).ok();
-        Ok(())
-    }
 }
 
 pub fn find_repo_root(start: &Path) -> Option<PathBuf> {

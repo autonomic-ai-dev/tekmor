@@ -1,0 +1,1 @@
+lib/clamp.sh returns the wrong bound when a value is outside the range. Fix it so that `sh check.sh` passes. Keep the change minimal and do not edit check.sh.

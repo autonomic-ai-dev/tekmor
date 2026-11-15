@@ -24,6 +24,7 @@ const STATE_FILE: &str = "stop-gate-state.json";
 pub struct StopInput {
     pub cwd: Option<String>,
     pub session_id: Option<String>,
+    pub transcript_path: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -63,11 +64,24 @@ fn proof_line(cmd: &str, code_hash: Option<&str>) -> String {
 }
 
 fn passing_run<'a>(code_hash: &str, evidence: &'a [Evidence]) -> Option<&'a Evidence> {
-    evidence.iter().find(|e| {
-        e.exit_code == 0
+    let counted = |e: &&Evidence| {
+        e.code_hash.as_deref() == Some(code_hash)
             && matches!(e.source.as_deref(), Some("cli" | "orchestrator"))
-            && e.code_hash.as_deref() == Some(code_hash)
-    })
+    };
+    let flaky: Vec<&str> = evidence
+        .iter()
+        .filter(counted)
+        .filter(|r| {
+            evidence
+                .iter()
+                .filter(counted)
+                .any(|o| o.cmd == r.cmd && (o.exit_code == 0) != (r.exit_code == 0))
+        })
+        .map(|r| r.cmd.as_str())
+        .collect();
+    evidence
+        .iter()
+        .find(|e| e.exit_code == 0 && counted(e) && !flaky.contains(&e.cmd.as_str()))
 }
 
 pub fn decide(verified: bool, blocks_so_far: u32) -> Decision {
@@ -187,10 +201,28 @@ fn load_evidence(store: &BrainStore, root: &Path) -> Result<Vec<Evidence>> {
         .collect())
 }
 
+fn claim_gap(store: &BrainStore, root: &Path, transcript: Option<&str>) -> Option<String> {
+    let text = crate::claims::last_assistant_text(Path::new(transcript?))?;
+    if !crate::claims::claims_passing(&text) {
+        return None;
+    }
+    let changed = changed_paths(root)
+        .iter()
+        .any(|path| verify::is_code_path(path) || verify::is_proof_input(path));
+    if !changed && !root.join(".verify/verify.toml").is_file() {
+        return None;
+    }
+    let receipt = crate::receipt::receipt_for_project(store, root).ok()?;
+    (receipt.verdict != crate::receipt::Verdict::Passed).then(|| {
+        "Your last message says the checks pass, but the receipt for this code is not PASSED. Run `tekmor verify -- <cmd>` on the current code, or correct the claim.".to_string()
+    })
+}
+
 pub fn run_stop_gate() -> Result<()> {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw)?;
     let input: StopInput = serde_json::from_str(&raw).unwrap_or_default();
+    let transcript = input.transcript_path.clone();
     let cwd = input
         .cwd
         .map(PathBuf::from)
@@ -205,7 +237,10 @@ pub fn run_stop_gate() -> Result<()> {
     let mode = AgentBrainSettings::load(&config.home).gates.stop;
     let repo_state =
         state_file.with_file_name(format!("stop-gate-state-{}.json", repo_name(&root)));
-    let outcome = evaluate_stop(&store, &root, &session_id, &repo_state, mode)?;
+    let outcome = match evaluate_stop(&store, &root, &session_id, &repo_state, mode)? {
+        StopOutcome::Clear => claim_gap(&store, &root, transcript.as_deref()).map_or(StopOutcome::Clear, StopOutcome::Block),
+        other => other,
+    };
     if let Some((kind, detail)) = gate_event(&outcome, mode, &root) {
         if let Err(err) =
             crate::gate_events::record(&config.logs_dir.join("gate-events.jsonl"), kind, &detail)
@@ -288,7 +323,7 @@ fn evaluate_stop(
     let gap = feature_gap(root);
     let code_changed = changed_paths(root)
         .iter()
-        .any(|path| verify::is_code_path(path));
+        .any(|path| verify::is_code_path(path) || verify::is_proof_input(path));
     let evidence = load_evidence(store, root)?;
     let proof = code_changed
         .then(|| verify::code_tree_hash(root))
@@ -377,6 +412,33 @@ mod tests {
     fn blocks_run_recorded_for_another_tree() {
         let ev = [evidence(0, Some("cli"), Some("old-tree"))];
         assert!(passing_run("new-tree", &ev).is_none());
+    }
+
+    #[test]
+    fn a_pass_claim_without_a_receipt_is_blocked_even_when_no_code_changed() {
+        let dir = TempDir::new().unwrap();
+        let aux = TempDir::new().unwrap();
+        let store = gate_store(aux.path());
+        edited_repo(dir.path(), Some("[verify]\ncommands = [\"true\"]\n"));
+        let transcript = aux.path().join("t.jsonl");
+        fs::write(
+            &transcript,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"All tests pass."}]}}"#,
+        )
+        .unwrap();
+        assert!(claim_gap(&store, dir.path(), transcript.to_str()).is_some());
+    }
+
+    #[test]
+    fn a_flaky_command_is_not_a_passing_run() {
+        let run = |exit_code| Evidence {
+            cmd: "cargo test".into(),
+            exit_code,
+            source: Some("cli".into()),
+            code_hash: Some("tree".into()),
+        };
+        assert!(passing_run("tree", &[run(0), run(1)]).is_none());
+        assert!(passing_run("tree", &[run(0), run(0)]).is_some());
     }
 
     #[test]
@@ -473,6 +535,18 @@ mod tests {
         if let Some(body) = verify_toml {
             fs::create_dir_all(dir.join(".verify")).unwrap();
             fs::write(dir.join(".verify/verify.toml"), body).unwrap();
+            Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "add", ".verify/verify.toml"])
+                .status()
+                .unwrap();
+            Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "baseline"])
+                .status()
+                .unwrap();
         }
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/changed.rs"), b"fn changed() {}").unwrap();
@@ -688,14 +762,53 @@ mod tests {
     }
 
     #[test]
+    fn code_tree_hash_moves_on_any_non_doc_file() {
+        let dir = TempDir::new().unwrap();
+        edited_repo(dir.path(), None);
+        let before = verify::code_tree_hash(dir.path()).unwrap();
+        fs::write(dir.path().join(".pass"), "").unwrap();
+        assert_ne!(verify::code_tree_hash(dir.path()).unwrap(), before);
+    }
+
+    #[test]
+    fn code_tree_hash_moves_on_proof_input_edits() {
+        let dir = TempDir::new().unwrap();
+        edited_repo(dir.path(), Some("[verify]\ncommands = [\"true\"]\n"));
+        let before = verify::code_tree_hash(dir.path()).unwrap();
+        fs::write(dir.path().join(".verify/verify.toml"), "[verify]\ncommands = [\"true\", \"echo ok\"]\n").unwrap();
+        assert_ne!(verify::code_tree_hash(dir.path()).unwrap(), before);
+    }
+
+    #[test]
     fn code_tree_hash_moves_on_code_edits_and_not_on_doc_edits() {
         let dir = TempDir::new().unwrap();
         edited_repo(dir.path(), None);
         let before = verify::code_tree_hash(dir.path()).unwrap();
-        fs::write(dir.path().join("changed.txt"), b"doc edit").unwrap();
+        fs::write(dir.path().join("changed.md"), b"doc edit").unwrap();
         assert_eq!(verify::code_tree_hash(dir.path()).unwrap(), before);
         fs::write(dir.path().join("src/changed.rs"), b"fn edited() {}").unwrap();
         assert_ne!(verify::code_tree_hash(dir.path()).unwrap(), before);
+    }
+
+    #[test]
+    fn a_proof_input_edit_forces_a_fresh_run() {
+        let dir = TempDir::new().unwrap();
+        let aux = TempDir::new().unwrap();
+        let store = gate_store(aux.path());
+        edited_repo(
+            dir.path(),
+            Some("[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
+        );
+        let state = aux.path().join("state.json");
+        assert_eq!(block_reason(&store, dir.path(), "s1", &state).unwrap(), None);
+        assert_eq!(store.list_verify_outcomes(10).unwrap().len(), 1);
+        fs::write(
+            dir.path().join(".verify/verify.toml"),
+            "[verify]\ncommands = [\"sh -c\", \"true\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
+        )
+        .unwrap();
+        assert_eq!(block_reason(&store, dir.path(), "s1", &state).unwrap(), None);
+        assert_eq!(store.list_verify_outcomes(10).unwrap().len(), 2);
     }
 
     #[test]

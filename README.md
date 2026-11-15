@@ -9,6 +9,9 @@ A proof eval for coding agents. tekmor runs the checks a project allowlists, rec
 - **summary**: `tekmor verify summary` shows which checks fail most.
 - **gates**: `tekmor stop-gate` and `tekmor bash-gate` run as Claude Code hooks. The stop gate blocks a turn with no passing proof or no feature map. The bash gate blocks or warns on risky shell commands and refuses commits that skip git hooks.
 - **feature maps**: `.verify/features/` maps code to the feature it belongs to and the checks that prove it.
+- **review**: `tekmor verify review` records a signed pass or fail for the current tree. Changes under the paths in `.verify/review.toml` need a passing review.
+- **ratchet, drift and check-checks**: `tekmor verify ratchet` keeps lint counts from rising, `tekmor verify drift` finds stale feature maps, and `tekmor verify check-checks` checks that each check fails on a broken copy.
+- **repeats**: `tekmor verify --repeat N -- <cmd>` records N runs. A command whose runs disagree is flaky and does not count as proof.
 
 ## Install
 

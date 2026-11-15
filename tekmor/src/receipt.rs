@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde::Serialize;
 
-use tekmor_core::evidence::EvidenceRecord;
+use tekmor_core::evidence::{flaky_commands, EvidenceRecord};
 
 use crate::db::store::BrainStore;
 use crate::evidence_reader;
@@ -59,6 +59,10 @@ pub struct Receipt {
     pub requirements: Vec<RequirementStatus>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub protected_changes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flaky: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_gap: Option<String>,
 }
 
 pub fn build_receipt(
@@ -66,9 +70,10 @@ pub fn build_receipt(
     head_sha: Option<&str>,
     code_hash: Option<&str>,
 ) -> Receipt {
+    let flaky = head_sha.zip(code_hash).map(|(head, hash)| flaky_commands(rows, head, hash)).unwrap_or_default();
     let evidence = head_sha.zip(code_hash).and_then(|(head, hash)| {
         rows.iter()
-            .find(|row| row.is_run_for(head, hash))
+            .find(|row| row.is_run_for(head, hash) && !flaky.contains(&row.cmd))
             .map(|row| Evidence {
                 id: row.id.clone(),
                 cmd: row.cmd.clone(),
@@ -90,6 +95,8 @@ pub fn build_receipt(
         evidence,
         requirements: Vec::new(),
         protected_changes: Vec::new(),
+        flaky,
+        review_gap: None,
     }
 }
 
@@ -101,7 +108,7 @@ fn latest_run<'a>(
 ) -> Option<&'a EvidenceRecord> {
     let (head, hash) = head_sha.zip(code_hash)?;
     rows.iter()
-        .find(|row| row.cmd == check && row.is_run_for(head, hash))
+        .find(|row| row.cmd == check && row.is_run_for(head, hash) && !flaky_commands(rows, head, hash).contains(&row.cmd))
 }
 
 pub fn requirement_states(
@@ -185,6 +192,11 @@ pub fn receipt_for_project(store: &BrainStore, root: &Path) -> Result<Receipt> {
         None => Vec::new(),
     };
     let mut receipt = build_receipt(&rows, head.as_deref(), code.as_deref());
+    let store = crate::review::default_store(&crate::config::Config::load()?.home);
+    if let Some(gap) = crate::review::gap(root, &store, code.as_deref()) {
+        receipt.verdict = Verdict::NotVerified;
+        receipt.review_gap = Some(gap);
+    }
     receipt.requirements = requirement_states(
         &load_specs(root),
         &rows,
@@ -252,6 +264,9 @@ pub fn render_text(receipt: &Receipt) -> String {
         None => out.push_str(&format!("  {}\n", not_verified_hint(receipt))),
     }
     out.push_str(&requirements_text(&receipt.requirements));
+    if let Some(gap) = &receipt.review_gap {
+        out.push_str(&format!("  review:    {gap}\n"));
+    }
     if !receipt.protected_changes.is_empty() {
         out.push_str(&format!(
             "  checks changed since last commit: {}\n",
@@ -407,14 +422,14 @@ mod tests {
     }
 
     #[test]
-    fn newest_matching_run_decides_even_when_an_older_one_passed() {
+    fn mixed_outcomes_on_one_tree_are_flaky_and_not_a_verdict() {
         let rows = [
             row("cargo test", 1, Some(HEAD), Some(HASH), Some("cli")),
             row("cargo test", 0, Some(HEAD), Some(HASH), Some("cli")),
         ];
         assert_eq!(
             build_receipt(&rows, Some(HEAD), Some(HASH)).verdict,
-            Verdict::Failed
+            Verdict::NotVerified
         );
     }
 
@@ -443,6 +458,17 @@ mod tests {
             build_receipt(&rows, Some(HEAD), Some(HASH)).verdict,
             Verdict::NotVerified
         );
+    }
+
+    #[test]
+    fn mixed_outcomes_for_one_command_on_the_same_tree_are_not_proof() {
+        let rows = [
+            row("cargo test", 0, Some(HEAD), Some(HASH), Some("cli")),
+            row("cargo test", 1, Some(HEAD), Some(HASH), Some("cli")),
+        ];
+        let receipt = build_receipt(&rows, Some(HEAD), Some(HASH));
+        assert_eq!(receipt.verdict, Verdict::NotVerified);
+        assert_eq!(receipt.flaky, ["cargo test"]);
     }
 
     #[test]
@@ -572,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn the_latest_run_decides_and_a_failing_run_is_failed() {
+    fn mixed_outcomes_for_a_requirement_leave_it_not_run() {
         let specs = [spec(
             "login",
             "R1. Users log in. check: `cargo test login`\n",
@@ -583,7 +609,7 @@ mod tests {
         ];
         assert_eq!(
             states(&specs, &rows, &["cargo test login"]),
-            [RequirementState::Failed]
+            [RequirementState::NotRun]
         );
     }
 

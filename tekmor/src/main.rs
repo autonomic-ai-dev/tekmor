@@ -103,6 +103,64 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
+            if sub == "check-checks" {
+                let cwd = std::env::current_dir()?;
+                let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
+                let verdicts = tekmor::check_checks::run(&root)?;
+                let mut accepted = true;
+                for v in &verdicts {
+                    let mark = if v.caught { "caught" } else { "NOT CAUGHT" };
+                    println!("{mark:<10} {}", v.cmd);
+                    accepted &= v.caught;
+                }
+                if !accepted {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+            if sub == "drift" {
+                let cwd = std::env::current_dir()?;
+                let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
+                let drift = tekmor::drift::check(&root);
+                for d in &drift {
+                    println!("{}: {}", d.feature, d.problem);
+                }
+                if drift.is_empty() {
+                    println!("no drift: feature maps match the code and the allowlist");
+                } else {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+            if sub == "review" {
+                let cwd = std::env::current_dir()?;
+                let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
+                let verdict = flag_value(&args, "--verdict").unwrap_or_default();
+                let reviewer = flag_value(&args, "--reviewer").unwrap_or_default();
+                let notes = flag_value(&args, "--notes").unwrap_or_default();
+                if !matches!(verdict.as_str(), "pass" | "fail") || reviewer.is_empty() {
+                    eprintln!("usage: tekmor verify review --verdict pass|fail --reviewer NAME [--notes TEXT]");
+                    std::process::exit(2);
+                }
+                let Some(hash) = tekmor::verify::code_tree_hash(&root) else {
+                    eprintln!("not a git repository: cannot bind a review to the tree");
+                    std::process::exit(2);
+                };
+                let config = tekmor::config::Config::load()?;
+                let store = tekmor::review::default_store(&config.home);
+                let path = tekmor::review::record(&root, &store, &hash, &verdict, &reviewer, &notes)?;
+                println!("recorded {verdict} review at {}", path.display());
+                return Ok(());
+            }
+            if sub == "ratchet" {
+                let cwd = std::env::current_dir()?;
+                let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
+                let ok = tekmor::ratchet::run(&root, args.iter().any(|a| a == "--update"))?;
+                if !ok {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
             if sub == "summary" {
                 let summaries = tekmor_core::evidence::summarize(
                     &tekmor::evidence_reader::recent_runs(&store, 500)?,
@@ -186,6 +244,27 @@ async fn main() -> Result<()> {
                     std::process::exit(report.exit_code);
                 }
             } else {
+                if let Some(n) = flag_value(&args, "--repeat").and_then(|v| v.parse::<u32>().ok()) {
+                    let exe = std::env::current_exe()?;
+                    let mut rest = Vec::new();
+                    let mut i = 2;
+                    while i < args.len() {
+                        if args[i] == "--repeat" {
+                            i += 2;
+                            continue;
+                        }
+                        rest.push(args[i].clone());
+                        i += 1;
+                    }
+                    let mut all_ok = true;
+                    for _ in 0..n {
+                        all_ok &= std::process::Command::new(&exe).arg("verify").args(&rest).status()?.success();
+                    }
+                    if !all_ok {
+                        std::process::exit(1);
+                    }
+                    return Ok(());
+                }
                 let route_log_id = flag_value(&args, "--route-log-id");
                 let cause = flag_value(&args, "--cause");
                 let config_path = flag_value(&args, "--config").map(std::path::PathBuf::from);

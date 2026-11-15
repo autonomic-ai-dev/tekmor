@@ -105,15 +105,6 @@ impl BrainStore {
         Ok(id)
     }
 
-    pub fn set_verify_outcome_tests_run(&self, id: &str, tests_run: u64) -> Result<()> {
-        self.with_conn(|conn| {
-            conn.execute(
-                "UPDATE verify_outcomes SET tests_run = ?1 WHERE id = ?2",
-                params![tests_run as i64, id],
-            )?;
-            Ok(())
-        })
-    }
 
     pub fn set_verify_outcome_code_hash(&self, id: &str, code_hash: &str) -> Result<()> {
         self.with_conn(|conn| {
@@ -135,15 +126,6 @@ impl BrainStore {
         })
     }
 
-    pub fn verify_outcome_tests_run(&self, id: &str) -> Result<Option<i64>> {
-        self.with_conn(|conn| {
-            Ok(conn.query_row(
-                "SELECT tests_run FROM verify_outcomes WHERE id = ?1",
-                params![id],
-                |r| r.get::<_, Option<i64>>(0),
-            )?)
-        })
-    }
 
     pub fn list_verify_outcomes(&self, limit: usize) -> Result<Vec<VerifyOutcomeRow>> {
         self.with_conn(|conn| {
