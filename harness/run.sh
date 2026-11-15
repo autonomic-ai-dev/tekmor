@@ -58,7 +58,7 @@ jq -c -n \
   '{task: $task, arm: $arm, rep: $rep, accepted: $accepted,
     receipt: $receipt, stop_events: $stop_events,
     turns: ($agent[0].num_turns // 0), duration_ms: ($agent[0].duration_ms // 0),
-    cost_usd: ($agent[0].total_cost_usd // 0), agent_error: ($agent[0].is_error // true)}' \
+    cost_usd: ($agent[0].total_cost_usd // 0), agent_error: ($agent[0].is_error != false)}' \
   >> "$HERE/results/metrics.jsonl"
 
 echo "$task $arm rep=$rep accepted=$([ "$accepted" -eq 0 ] && echo yes || echo no) receipt=[$receipt]"
