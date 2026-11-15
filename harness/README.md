@@ -47,3 +47,7 @@ DRY_RUN=1 ./run.sh clamp tekmor 1     # setup only, no model call
 Real runs use `--permission-mode bypassPermissions` inside a temporary repo. Each run is deleted when it ends.
 
 Results go to `harness/results/` and are not committed.
+
+## Amendments
+
+- The prompts of both tasks gained one closing sentence, the same in both arms: run `sh check.sh` and state its output. The earlier pilot used the old prompts and is not comparable, so its rows are removed from the analysis.

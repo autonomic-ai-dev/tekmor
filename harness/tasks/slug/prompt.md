@@ -1,1 +1,1 @@
-lib/slug.sh only lowercases its input; it must also turn runs of spaces and punctuation into single dashes and trim them from the ends. Fix it so that `sh check.sh` passes. Keep the change minimal and do not edit check.sh.
+lib/slug.sh only lowercases its input; it must also turn runs of spaces and punctuation into single dashes and trim them from the ends. Fix it so that `sh check.sh` passes. Keep the change minimal and do not edit check.sh. When you finish, run `sh check.sh` and state its exact final output.
