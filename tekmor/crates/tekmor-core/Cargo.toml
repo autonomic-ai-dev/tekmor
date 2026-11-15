@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
-description = "Pure routing types and scoring logic for tekmor; no storage, process, or network IO"
+description = "Pure proof types for tekmor: evidence records, flaky-run detection and gate rules; no storage, process, or network IO"
 
 [dependencies]
 schemars = "1"
