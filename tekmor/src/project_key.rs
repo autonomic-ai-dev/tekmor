@@ -10,7 +10,6 @@ use sha2::{Digest, Sha256};
 
 use crate::config::find_repo_root;
 
-
 pub fn project_key_if_known(cwd: &Path) -> Option<String> {
     let repo_root = find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     if let Ok(Some(remote)) = git_remote_url(&repo_root) {
@@ -22,7 +21,6 @@ pub fn project_key_if_known(cwd: &Path) -> Option<String> {
     let id = fs::read_to_string(repo_root.join(".tekmor-id")).ok()?;
     Some(hash_hex(id.trim()))
 }
-
 
 /// Normalize a git remote for hashing: strip credentials, lowercase host, owner/repo.
 pub fn normalize_remote_url(raw: &str) -> String {
@@ -52,14 +50,6 @@ pub fn normalize_remote_url(raw: &str) -> String {
         return cleaned.to_ascii_lowercase();
     }
     s.trim_end_matches(".git").to_ascii_lowercase()
-}
-
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectKeySource {
-    GitRemote,
-    FirstCommit,
-    AgentBrainId,
 }
 
 fn hash_hex(s: &str) -> String {
@@ -110,11 +100,6 @@ fn git_first_commit(repo: &Path) -> Result<Option<String>> {
         Ok(Some(oid))
     }
 }
-
-
-
-
-
 
 #[cfg(test)]
 mod tests {
