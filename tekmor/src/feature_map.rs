@@ -56,18 +56,42 @@ pub fn parse_verification_commands(text: &str) -> Vec<String> {
     for line in text.lines() {
         if line.starts_with("## ") {
             in_section = line.starts_with("## Verification Suites");
-        } else if in_section {
+        } else if in_section && !is_result_line(line) {
             commands.extend(
                 line.split('`')
                     .skip(1)
                     .step_by(2)
                     .map(str::trim)
-                    .filter(|command| !command.is_empty())
+                    .filter(|span| is_command(span))
                     .map(str::to_string),
             );
         }
     }
     commands
+}
+
+fn is_result_line(line: &str) -> bool {
+    let label = line
+        .trim_start_matches(|c: char| c == '-' || c == '*' || c.is_whitespace())
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    matches!(label.as_str(), "expected" | "expect" | "output" | "result" | "request" | "note")
+}
+
+fn is_command(span: &str) -> bool {
+    if span.is_empty() {
+        return false;
+    }
+    let data_file = [".toml", ".rs", ".md", ".json", ".yaml", ".yml", ".lock"]
+        .iter()
+        .any(|ext| span.ends_with(ext));
+    if data_file {
+        return false;
+    }
+    span.contains(' ') || span.starts_with("./") || span.starts_with(".verify/") || !span.contains(['.', '/', '_'])
 }
 
 fn is_code(path: &str) -> bool {
@@ -345,4 +369,22 @@ mod tests {
         assert_eq!(parse_verification_commands(text), ["cargo test a"]);
     }
 
+
+    #[test]
+    fn file_names_and_single_tool_names_are_not_commands() {
+        let text = "## Verification Suites\n- Config: `.verify/verify.toml`\n- Module: `jetstream_bridge.rs`\n- Helper: `wait_for_brain`\n- Entry: `.verify/run.sh`\n";
+        assert_eq!(parse_verification_commands(text), [".verify/run.sh"]);
+    }
+
+    #[test]
+    fn a_single_word_tool_name_is_read_as_a_command() {
+        let text = "## Verification Suites\n- Lint: `make`\n";
+        assert_eq!(parse_verification_commands(text), ["make"]);
+    }
+
+    #[test]
+    fn expected_and_request_lines_are_not_commands() {
+        let text = "## Verification Suites\n- Request: `CMD anode cluster ./testdata/hyper_mesh_12`\n  - Expected: exit code `0`\n- Unit: `cargo test -p thesmos`\n";
+        assert_eq!(parse_verification_commands(text), ["cargo test -p thesmos"]);
+    }
 }
