@@ -51,3 +51,5 @@ Results go to `harness/results/` and are not committed.
 ## Amendments
 
 - The prompts of both tasks gained one closing sentence, the same in both arms: run `sh check.sh` and state its output. The earlier pilot used the old prompts and is not comparable, so its rows are removed from the analysis.
+
+- Runs load only project and local settings (`--setting-sources project,local`), so a user's global hooks do not reach the agent. The user's global instruction files still load, in both arms alike. An empty config directory fails to authenticate, so they cannot be removed without copying credentials.

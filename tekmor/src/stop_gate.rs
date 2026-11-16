@@ -218,10 +218,17 @@ fn claim_gap(store: &BrainStore, root: &Path, transcript: Option<&str>) -> Optio
     })
 }
 
+pub fn hook_blocked(message: &str) -> ! {
+    eprintln!("{message}");
+    std::process::exit(2)
+}
+
 pub fn run_stop_gate() -> Result<()> {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw)?;
-    let input: StopInput = serde_json::from_str(&raw).unwrap_or_default();
+    let input: StopInput = serde_json::from_str(&raw).unwrap_or_else(|err| {
+        hook_blocked(&format!("tekmor could not read the Stop hook input ({err}); the turn is blocked until the gate can read its input"))
+    });
     let transcript = input.transcript_path.clone();
     let cwd = input
         .cwd
@@ -247,6 +254,9 @@ pub fn run_stop_gate() -> Result<()> {
         {
             tracing::warn!(error = %err, "gate event write failed");
         }
+    }
+    if let StopOutcome::Block(reason) = &outcome {
+        hook_blocked(&named_reason(&root, reason));
     }
     if let Some(output) = hook_output(&outcome, mode, &root) {
         println!("{output}");
@@ -291,10 +301,7 @@ fn hook_output(outcome: &StopOutcome, mode: GateMode, root: &Path) -> Option<ser
                 "tekmor: {repo} VERIFIED. {proof}. Details: `tekmor verify receipt`."
             )
         })),
-        (StopOutcome::Block(reason), _) => Some(serde_json::json!({
-            "decision": "block",
-            "reason": named_reason(root, reason)
-        })),
+        (StopOutcome::Block(_), _) => None,
         (StopOutcome::HandBack(reason), GateMode::Watch) => Some(serde_json::json!({
             "systemMessage": format!(
                 "tekmor (watch mode): {repo} would have been blocked from finishing. {}",
