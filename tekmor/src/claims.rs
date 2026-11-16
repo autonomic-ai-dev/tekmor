@@ -20,11 +20,18 @@ pub fn last_assistant_text(transcript: &Path) -> Option<String> {
 }
 
 pub fn claims_passing(text: &str) -> bool {
-    let pattern = Regex::new(
+    let positive = Regex::new(
         r"(?i)\b(tests?|checks?|suite|build|clippy|lint)\b[^.\n]{0,30}\b(pass(es|ed)?|passing|green|succeed(s|ed)?)\b",
     )
     .expect("static pattern");
-    pattern.is_match(text)
+    let negated = Regex::new(
+        r"(?i)\b(not|never|no|unable|didn't|doesn't|don't|won't|isn't|aren't|wasn't|weren't|haven't|hasn't)\b(\s+\w+){0,2}\s+(pass|passes|passed|passing|green|succeed|succeeds|succeeded)\b|\b(can't|cannot|couldn't|unable\s+to)\s+(confirm|verify|say|claim|tell)\b|\b(still|is|are|was|were)\s+(failing|failed|red|broken)\b",
+    )
+    .expect("static pattern");
+    let quoted = Regex::new(r"\x22[^\x22]*\x22").expect("static pattern");
+    text.split(['.', '!', '?', '\n'])
+        .map(|sentence| quoted.replace_all(sentence, " "))
+        .any(|sentence| positive.is_match(&sentence) && !negated.is_match(&sentence))
 }
 
 #[cfg(test)]
@@ -66,5 +73,41 @@ mod tests {
     #[test]
     fn a_missing_transcript_gives_no_text() {
         assert!(last_assistant_text(Path::new("/nonexistent/t.jsonl")).is_none());
+    }
+
+    #[test]
+    fn a_negated_sentence_is_not_a_pass_claim() {
+        assert!(!claims_passing("I did not run the tests, so I cannot say they pass."));
+        assert!(!claims_passing("The tests do not pass yet."));
+        assert!(!claims_passing("The build didn't pass."));
+        assert!(!claims_passing("I can't confirm the suite passes."));
+    }
+
+    #[test]
+    fn a_quoted_pass_is_not_the_agents_claim() {
+        assert!(!claims_passing("The user wrote \"all tests pass\" in the ticket."));
+    }
+
+    #[test]
+    fn a_pass_claim_in_a_later_sentence_is_still_detected() {
+        assert!(claims_passing("I changed the parser. All tests pass now."));
+    }
+
+    #[test]
+    fn a_pass_with_a_failure_count_of_zero_is_still_a_claim() {
+        assert!(claims_passing("The full library suite passes on the host: 284 tests, 0 failed."));
+        assert!(claims_passing("The recorded suite passes: 785 tests, 0 failed."));
+    }
+
+    #[test]
+    fn fail_closed_and_no_processes_do_not_negate_a_pass() {
+        assert!(claims_passing("All 17 budget-gate tests pass, including the six new fail-closed cases."));
+        assert!(claims_passing("The regression test passes and leaves no processes behind."));
+        assert!(claims_passing("The full suite passed (exit 0, no failures)."));
+    }
+
+    #[test]
+    fn a_hedged_refusal_to_confirm_is_not_a_claim() {
+        assert!(!claims_passing("I can't confirm the suite passes without running it."));
     }
 }
