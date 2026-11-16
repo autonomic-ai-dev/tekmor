@@ -40,6 +40,7 @@ else
   TEKMOR_HOME="$home" claude -p "$(cat "$src/prompt.md")" \
     --output-format json \
     --max-budget-usd "${BUDGET_USD:-1}" \
+    --setting-sources project,local \
     --permission-mode bypassPermissions > "$out" || true
 fi
 
