@@ -827,7 +827,9 @@ fn normalize(path: &Path) -> PathBuf {
 pub fn run_bash_gate() -> Result<()> {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw)?;
-    let input: BashInput = serde_json::from_str(&raw).unwrap_or_default();
+    let input: BashInput = serde_json::from_str(&raw).unwrap_or_else(|err| {
+        crate::stop_gate::hook_blocked(&format!("tekmor could not read the PreToolUse hook input ({err}); the command is blocked"))
+    });
     let root = input
         .cwd
         .map(PathBuf::from)
@@ -856,18 +858,7 @@ pub fn run_bash_gate() -> Result<()> {
         }
         GateVerdict::Block(reason) => {
             record_gate_event("bash-block", &reason);
-            println!(
-                "{}",
-                json!({
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": format!(
-                            "tekmor blocked this command: {reason}. If it is intended, ask the user to run it."
-                        )
-                    }
-                })
-            )
+            crate::stop_gate::hook_blocked(&format!("tekmor blocked this command: {reason}. If it is intended, ask the user to run it."));
         }
     }
     Ok(())

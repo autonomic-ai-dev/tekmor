@@ -36,6 +36,10 @@ fn run_bash_gate_in(home: &Path, command: &str, cwd: &str) -> Value {
         .write_all(payload.to_string().as_bytes())
         .expect("write hook payload");
     let output = child.wait_with_output().expect("wait for bash-gate");
+    if output.status.code() == Some(2) {
+        let reason = String::from_utf8(output.stderr).expect("utf8 stderr");
+        return serde_json::json!({ "hookSpecificOutput": { "permissionDecision": "deny", "permissionDecisionReason": reason.trim() } });
+    }
     assert!(output.status.success(), "bash-gate exited with failure");
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
     if stdout.trim().is_empty() {
@@ -137,4 +141,20 @@ fn gate_events_are_written_under_the_configured_home() {
         .collect();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0]["kind"], "bash-block");
+}
+
+#[test]
+fn unreadable_hook_input_blocks_the_command() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tekmor"))
+        .arg("bash-gate")
+        .env("TEKMOR_HOME", isolated_home())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn tekmor bash-gate");
+    child.stdin.take().expect("stdin").write_all(b"not json").expect("write");
+    let output = child.wait_with_output().expect("wait for bash-gate");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("could not read"));
 }
