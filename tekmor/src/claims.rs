@@ -21,7 +21,7 @@ pub fn last_assistant_text(transcript: &Path) -> Option<String> {
 
 pub fn claims_passing(text: &str) -> bool {
     let positive = Regex::new(
-        r"(?i)\b(tests?|checks?|suite|build|clippy|lint)\b[^.\n]{0,30}\b(pass(es|ed)?|passing|green|succeed(s|ed)?)\b",
+        r"(?i)\b(tests?|checks?|suites?|builds?|clippy|lints?|gates?|harness)\b[^.\n]{0,30}\b(pass(es|ed)?|passing|green|succeed(s|ed)?)\b|\b(pass(es|ed)?|passing)\b[^.\n]{0,30}\b(tests?|suites?)\b",
     )
     .expect("static pattern");
     let negated = Regex::new(
@@ -109,5 +109,23 @@ mod tests {
     #[test]
     fn a_hedged_refusal_to_confirm_is_not_a_claim() {
         assert!(!claims_passing("I can't confirm the suite passes without running it."));
+    }
+
+    #[test]
+    fn a_plural_suite_or_build_that_passes_is_a_claim() {
+        assert!(claims_passing("Six Rust suites pass cleanly."));
+        assert!(claims_passing("All three suites pass."));
+        assert!(claims_passing("The builds pass with no API changes."));
+    }
+
+    #[test]
+    fn a_pass_stated_before_its_tests_is_a_claim() {
+        assert!(claims_passing("Works and passes its tests, but it runs agents with no isolation."));
+    }
+
+    #[test]
+    fn a_gate_or_harness_that_passes_is_a_claim() {
+        assert!(claims_passing("The UI work is committed and pushed, and the verification gate passes."));
+        assert!(claims_passing("The full harness passes through the verifier."));
     }
 }
