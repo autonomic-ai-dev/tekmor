@@ -91,7 +91,7 @@ fn is_command(span: &str) -> bool {
     if data_file {
         return false;
     }
-    span.contains(' ') || span.starts_with("./") || span.starts_with(".verify/")
+    span.contains(' ') || span.starts_with("./") || span.starts_with(".verify/") || !span.contains(['.', '/', '_'])
 }
 
 fn is_code(path: &str) -> bool {
@@ -372,8 +372,14 @@ mod tests {
 
     #[test]
     fn file_names_and_single_tool_names_are_not_commands() {
-        let text = "## Verification Suites\n- Config: `.verify/verify.toml`\n- Module: `jetstream_bridge.rs`\n- Broker: `protoc`\n- Helper: `wait_for_brain`\n- Entry: `.verify/run.sh`\n";
+        let text = "## Verification Suites\n- Config: `.verify/verify.toml`\n- Module: `jetstream_bridge.rs`\n- Helper: `wait_for_brain`\n- Entry: `.verify/run.sh`\n";
         assert_eq!(parse_verification_commands(text), [".verify/run.sh"]);
+    }
+
+    #[test]
+    fn a_single_word_tool_name_is_read_as_a_command() {
+        let text = "## Verification Suites\n- Lint: `make`\n";
+        assert_eq!(parse_verification_commands(text), ["make"]);
     }
 
     #[test]
