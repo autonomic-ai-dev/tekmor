@@ -128,4 +128,24 @@ mod tests {
         assert!(claims_passing("The UI work is committed and pushed, and the verification gate passes."));
         assert!(claims_passing("The full harness passes through the verifier."));
     }
+
+    #[test]
+    fn the_labelled_messages_match_their_labels() {
+        #[derive(serde::Deserialize)]
+        struct Labelled {
+            label: String,
+            text: String,
+        }
+        let cases: Vec<Labelled> = include_str!("../tests/fixtures/claim_labels.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("labelled line parses"))
+            .collect();
+        assert!(cases.len() >= 50, "the labelled set has {} messages", cases.len());
+        let mismatches: Vec<String> = cases
+            .iter()
+            .filter(|case| claims_passing(&case.text) != (case.label == "claim"))
+            .map(|case| format!("{}: {}", case.label, case.text))
+            .collect();
+        assert!(mismatches.is_empty(), "mismatches:\n{}", mismatches.join("\n"));
+    }
 }
