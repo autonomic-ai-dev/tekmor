@@ -25,7 +25,7 @@ pub fn claims_passing(text: &str) -> bool {
     )
     .expect("static pattern");
     let negated = Regex::new(
-        r"(?i)\b(not|never|no|unable|didn't|doesn't|don't|won't|isn't|aren't|wasn't|weren't|haven't|hasn't)\b(\s+\w+){0,2}\s+(pass|passes|passed|passing|green|succeed|succeeds|succeeded)\b|\b(can't|cannot|couldn't|unable\s+to)\s+(confirm|verify|say|claim|tell)\b|\b(still|is|are|was|were)\s+(failing|failed|red|broken)\b|\b(not|never)\s+(yet\s+)?(verified|confirmed)\b|\b(nothing|none)\b[^.\n]{0,20}\bpass(es|ed)?\b|\b(will|should|would|could|might|may|expect)\b[^.\n]{0,30}\bpass(es|ed)?\b|\b(whether|to see if)\b[^.\n]{0,30}\bpass(es|ed)?\b|\bI'll\b|\bI will\b|\bpass(es|ed)?\s+or\s+fail(s|ed)?\b|\b(below|short of)\b|\bnot count\b|\b(once|until|only when|if)\b[^.\n]{0,30}\bpass(es|ed)?\b|\bpass(es|ed)?\s+(once|when|only|if|until)\b|\bonly when\b|\bwithout\b[^.\n]{0,30}\bpass(es|ed|ing)?\b|\bpass(\s+rate|\s+count|/fail)\b",
+        r"(?i)\b(not|never|no|unable|didn't|doesn't|don't|won't|isn't|aren't|wasn't|weren't|haven't|hasn't)\b(\s+\w+){0,2}\s+(pass|passes|passed|passing|green|succeed|succeeds|succeeded)\b|\b(can't|cannot|couldn't|unable\s+to)\s+(confirm|verify|say|claim|tell)\b|\b(still|is|are|was|were)\s+(failing|failed|red|broken)\b|\b(not|never)\s+(yet\s+)?(verified|confirmed)\b|\b(nothing|none)\b[^.\n]{0,20}\bpass(es|ed)?\b|\b(will|should|would|could|might|may|expect)\b[^.\n]{0,30}\bpass(es|ed)?\b|\b(whether|to see if)\b[^.\n]{0,30}\bpass(es|ed)?\b|\bI'll\b|\bI will\b|\bpass(es|ed)?\s+or\s+fail(s|ed)?\b|\b(below|short of)\b|\bnot count\b|\b(once|until|only when|if)\b[^.\n]{0,30}\bpass(es|ed)?\b|\bpass(es|ed)?\s+(once|only)\b|\bonly when\b|\bwithout\b[^.\n]{0,30}\bpass(es|ed|ing)?\b|\bpass(\s+rate|\s+count|/fail)\b",
     )
     .expect("static pattern");
     let sentence_break = Regex::new(r"\.[\s*]|[!?\n]").expect("static pattern");
@@ -169,6 +169,11 @@ mod tests {
         assert!(!claims_passing("The stop gate passes once the map and the entry are in place."));
         assert!(!claims_passing("PASSED only when every check the map names has a PASSED run."));
         assert!(!claims_passing("It will not let a turn end without a real check passing."));
+    }
+
+    #[test]
+    fn a_pass_that_names_when_it_runs_is_still_a_claim() {
+        assert!(claims_passing("Those 11 tests pass when I run them directly."));
     }
 
     #[test]
