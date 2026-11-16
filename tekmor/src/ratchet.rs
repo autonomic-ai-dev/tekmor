@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 pub const RATCHET_FILE: &str = ".verify/ratchet.toml";
+const MAX_LISTED_HITS: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rule {
@@ -55,6 +56,32 @@ fn tracked_files(root: &Path) -> Result<Vec<String>> {
         .collect())
 }
 
+fn in_scope(rule: &Rule, path: &str) -> bool {
+    rule.paths.is_empty() || rule.paths.iter().any(|p| path.starts_with(p.as_str()))
+}
+
+fn hit_lines(root: &Path, rule: &Rule) -> Result<Vec<String>> {
+    let re = regex::Regex::new(&rule.pattern)
+        .with_context(|| format!("rule {} has an invalid pattern", rule.name))?;
+    let mut hits = Vec::new();
+    for path in tracked_files(root)?
+        .iter()
+        .filter(|path| in_scope(rule, path))
+    {
+        let Ok(text) = std::fs::read_to_string(root.join(path)) else {
+            continue;
+        };
+        for (index, line) in text
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| re.is_match(line))
+        {
+            hits.push(format!("{path}:{}: {}", index + 1, line.trim()));
+        }
+    }
+    Ok(hits)
+}
+
 pub fn read(root: &Path, file: &RatchetFile) -> Result<Vec<Reading>> {
     let files = tracked_files(root)?;
     file.rules
@@ -64,7 +91,7 @@ pub fn read(root: &Path, file: &RatchetFile) -> Result<Vec<Reading>> {
                 .with_context(|| format!("rule {} has an invalid pattern", rule.name))?;
             let count = files
                 .iter()
-                .filter(|path| rule.paths.is_empty() || rule.paths.iter().any(|p| path.starts_with(p.as_str())))
+                .filter(|path| in_scope(rule, path))
                 .filter_map(|path| std::fs::read_to_string(root.join(path)).ok())
                 .map(|text| re.find_iter(&text).count())
                 .sum();
@@ -129,6 +156,15 @@ pub fn run(root: &Path, update: bool) -> Result<bool> {
     for r in &readings {
         let verdict = if r.passes() { "ok" } else { "over baseline" };
         println!("{:<32} {:>6} / baseline {:<6} {verdict}", r.name, r.count, r.baseline);
+    }
+    for reading in readings.iter().filter(|r| !r.passes()) {
+        let Some(rule) = file.rules.iter().find(|rule| rule.name == reading.name) else {
+            continue;
+        };
+        for line in hit_lines(root, rule)?.iter().take(MAX_LISTED_HITS) {
+            println!("  {line}");
+        }
+        println!("  rule {}: remove the new matches above. The baseline only goes down; the project owner raises it in {RATCHET_FILE}.", rule.name);
     }
     let ok = readings.iter().all(Reading::passes);
     if update {
@@ -210,6 +246,16 @@ mod tests {
         std::fs::write(dir.path().join("a.rs"), "let t = Utc::now(); let u = Utc::now();").unwrap();
         std::process::Command::new("git").arg("-C").arg(dir.path()).args(["add", "a.rs"]).status().unwrap();
         assert!(!run(dir.path(), false).unwrap());
+    }
+
+    #[test]
+    fn a_rule_over_its_baseline_lists_each_new_match_with_its_location() {
+        let dir = tracked_repo(&[("a.rs", "let t = Utc::now();\nlet n = 1;\n")]);
+        add(dir.path(), "no-utc-now", r"Utc::now\(\)", vec![], None).unwrap();
+        std::fs::write(dir.path().join("a.rs"), "let t = Utc::now();\nlet u = Utc::now();\n").unwrap();
+        std::process::Command::new("git").arg("-C").arg(dir.path()).args(["add", "a.rs"]).status().unwrap();
+        let rule = load(dir.path()).unwrap().rules.remove(0);
+        assert_eq!(hit_lines(dir.path(), &rule).unwrap(), vec!["a.rs:1: let t = Utc::now();", "a.rs:2: let u = Utc::now();"]);
     }
 
     #[test]
