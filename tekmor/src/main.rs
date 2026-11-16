@@ -152,6 +152,23 @@ async fn main() -> Result<()> {
                 println!("recorded {verdict} review at {}", path.display());
                 return Ok(());
             }
+            if sub == "ratchet" && args.get(3).map(String::as_str) == Some("add") {
+                let cwd = std::env::current_dir()?;
+                let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
+                let option = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+                let paths: Vec<String> = args
+                    .windows(2)
+                    .filter(|pair| pair[0] == "--path")
+                    .map(|pair| pair[1].clone())
+                    .collect();
+                let (Some(name), Some(pattern)) = (option("--name"), option("--pattern")) else {
+                    anyhow::bail!("usage: tekmor verify ratchet add --name NAME --pattern REGEX [--path PREFIX]... [--baseline N]");
+                };
+                let baseline = option("--baseline").map(|v| v.parse::<usize>()).transpose()?;
+                let rule = tekmor::ratchet::add(&root, &name, &pattern, paths, baseline)?;
+                println!("added {} (baseline {}) to {}", rule.name, rule.baseline, tekmor::ratchet::RATCHET_FILE);
+                return Ok(());
+            }
             if sub == "ratchet" {
                 let cwd = std::env::current_dir()?;
                 let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);

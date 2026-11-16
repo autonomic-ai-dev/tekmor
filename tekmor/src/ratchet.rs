@@ -96,6 +96,33 @@ pub fn lowered(file: &RatchetFile, readings: &[Reading]) -> RatchetFile {
     }
 }
 
+
+pub fn add(root: &Path, name: &str, pattern: &str, paths: Vec<String>, baseline: Option<usize>) -> Result<Rule> {
+    regex::Regex::new(pattern).with_context(|| format!("invalid pattern `{pattern}`"))?;
+    let mut file = load(root)?;
+    if file.rules.iter().any(|rule| rule.name == name) {
+        anyhow::bail!("a rule named {name} already exists in {RATCHET_FILE}");
+    }
+    let mut rule = Rule {
+        name: name.to_string(),
+        pattern: pattern.to_string(),
+        paths,
+        baseline: 0,
+    };
+    rule.baseline = match baseline {
+        Some(value) => value,
+        None => read(root, &RatchetFile { rules: vec![rule.clone()] })?[0].count,
+    };
+    file.rules.push(rule.clone());
+    let path = root.join(RATCHET_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let text = toml::to_string(&file).context("serialize ratchet")?;
+    std::fs::write(&path, text).with_context(|| format!("write {RATCHET_FILE}"))?;
+    Ok(rule)
+}
+
 pub fn run(root: &Path, update: bool) -> Result<bool> {
     let file = load(root)?;
     let readings = read(root, &file)?;
@@ -163,5 +190,39 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let file = RatchetFile { rules: vec![rule("(", 0)] };
         assert!(read(dir.path(), &file).is_err());
+    }
+
+    fn tracked_repo(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::process::Command::new("git").arg("-C").arg(dir.path()).args(["init", "-q"]).status().unwrap();
+        for (name, text) in files {
+            std::fs::write(dir.path().join(name), text).unwrap();
+            std::process::Command::new("git").arg("-C").arg(dir.path()).args(["add", name]).status().unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_correction_rule_starts_at_the_current_count_so_only_new_matches_fail() {
+        let dir = tracked_repo(&[("a.rs", "let t = Utc::now();")]);
+        add(dir.path(), "no-utc-now", r"Utc::now\(\)", vec![], None).unwrap();
+        assert!(run(dir.path(), false).unwrap());
+        std::fs::write(dir.path().join("a.rs"), "let t = Utc::now(); let u = Utc::now();").unwrap();
+        std::process::Command::new("git").arg("-C").arg(dir.path()).args(["add", "a.rs"]).status().unwrap();
+        assert!(!run(dir.path(), false).unwrap());
+    }
+
+    #[test]
+    fn adding_a_rule_with_a_duplicate_name_is_refused() {
+        let dir = tracked_repo(&[]);
+        add(dir.path(), "r", "x", vec![], Some(0)).unwrap();
+        assert!(add(dir.path(), "r", "y", vec![], Some(0)).is_err());
+    }
+
+    #[test]
+    fn adding_a_rule_with_an_invalid_pattern_writes_nothing() {
+        let dir = tracked_repo(&[]);
+        assert!(add(dir.path(), "bad", "(", vec![], None).is_err());
+        assert!(!dir.path().join(RATCHET_FILE).exists());
     }
 }
