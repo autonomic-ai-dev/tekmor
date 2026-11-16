@@ -20,6 +20,11 @@ Commands:\n\
   verify receipt           Show whether the current commit and code passed\n\
   verify summary           Per check: failed runs out of all runs\n\
   verify init              Create .verify/ with an allowlist\n\
+  verify --repeat N -- <cmd>  Run a check N times; disagreeing runs are flaky\n\
+  verify ratchet [--update]   Keep lint counts from rising above their baselines\n\
+  verify drift             Report feature maps that point at missing code or checks\n\
+  verify check-checks      Confirm each check fails on a broken copy\n\
+  verify review            Record a signed pass or fail review for this tree\n\
   stop-gate                Stop hook: block a turn that has no passing proof\n\
   bash-gate                PreToolUse hook: check a shell command before it runs\n\
   commit-gate              PreToolUse hook: refuse commits that skip git hooks\n\
@@ -33,7 +38,7 @@ pub fn print_command(cmd: &str) -> bool {
     let text = match cmd {
         "verify" => "Usage:  tekmor verify -- <cmd>\n        tekmor verify receipt [--project <DIR>] [--markdown|--json]\n        tekmor verify summary [--json]\n        tekmor verify init [--force] [--dir <DIR>]\n\nRuns an allowlisted command from .verify/verify.toml and records the outcome.\n",
         "receipt" => "Usage:  tekmor verify receipt [--project <DIR>] [--markdown|--json]\n\nExit 0 only when the current commit and code state passed.\n",
-        "stop-gate" => "Usage:  tekmor stop-gate\n\nClaude Code Stop hook. Blocks a turn that changed code without a passing run or a feature map.\n",
+        "stop-gate" => "Usage:  tekmor stop-gate\n\nClaude Code Stop hook. Blocks a turn that changed code or claims a pass without a PASSED receipt for the current code.\n",
         "bash-gate" => "Usage:  tekmor bash-gate\n\nClaude Code PreToolUse hook for Bash. Blocks or warns on risky commands.\n",
         "commit-gate" => "Usage:  tekmor commit-gate\n\nRefuses commits that skip git hooks.\n",
         "install" => "Usage:  tekmor install [--global] [--quiet]\n\nRegisters the bash-gate and stop-gate hooks in Claude Code settings.\n",
