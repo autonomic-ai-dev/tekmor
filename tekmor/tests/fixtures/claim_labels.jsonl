@@ -1,0 +1,140 @@
+{"label":"claim","source":"real","text":"- `cargo test -p core-crate`: 30 tests pass (4 + 8 + 6 existing, 12 new)."}
+{"label":"claim","source":"real","text":"- `cargo check --workspace`: passes."}
+{"label":"claim","source":"real","text":"The Rust checks pass through `agent-brain verify`, but the stop gate still reports the frontend edits as unverified."}
+{"label":"claim","source":"real","text":"- `bun run build` and `bun run check`: rejected by `agent-brain verify`. Run directly, both pass: the build succeeds, and `svelte-check` reports 0 errors and 0 warnings."}
+{"label":"claim","source":"real","text":"**Verification:** the Tauri crate compiles, and `cargo test --workspace` and `cargo clippy -D warnings` pass."}
+{"label":"claim","source":"real","text":"The build, `svelte-check`, the Rust tests, and clippy all pass."}
+{"label":"claim","source":"real","text":"The deployment-rollback verify suite passes."}
+{"label":"claim","source":"real","text":"Both live tests pass."}
+{"label":"claim","source":"real","text":"- **Unit and static checks:** pass (`.verify/run.sh all`)."}
+{"label":"claim","source":"real","text":"- **Capability suite:** 30 pass."}
+{"label":"claim","source":"real","text":"Works and passes its tests, but it runs agents with no isolation."}
+{"label":"claim","source":"real","text":"The UI work is committed and pushed, and the verification gate passes."}
+{"label":"claim","source":"real","text":"The full harness passes through `agent-brain verify`."}
+{"label":"claim","source":"real","text":"Build, unit, UI, and security pass on the current code."}
+{"label":"claim","source":"real","text":"The build and the 53 tests pass."}
+{"label":"claim","source":"real","text":"All ten MCP HTTP tests pass, including the Origin refusal, the connection cap, and the timeout."}
+{"label":"claim","source":"real","text":"The route-related integration suites pass."}
+{"label":"claim","source":"real","text":"The pull request is merged after the protected-path check passed."}
+{"label":"claim","source":"real","text":"The gate ran 139 test result blocks, with 654 passed and 0 failed."}
+{"label":"claim","source":"real","text":"The type check passes with no errors."}
+{"label":"claim","source":"real","text":"A quick check confirmed a two-node loop passes `validate`."}
+{"label":"claim","source":"real","text":"The verification run exited 0: 800 tests passed, 0 failed."}
+{"label":"claim","source":"real","text":"The build passes with no API changes."}
+{"label":"claim","source":"real","text":"The R-17 regression test passes."}
+{"label":"claim","source":"real","text":"The 115 tests in the affected modules pass."}
+{"label":"claim","source":"real","text":"- `cargo test -p tekmor`: 204 passed, 0 failed."}
+{"label":"claim","source":"real","text":"All 49 stop-gate tests pass, including the new one."}
+{"label":"claim","source":"real","text":"Both checks fail before the fix, and both acceptance tests pass with a correct reference fix."}
+{"label":"claim","source":"real","text":"Homebrew disables the audit on file paths in this version. The Ruby syntax check passes."}
+{"label":"claim","source":"real","text":"The service is verified: its three checks pass, the 58 tests pass, and the receipt reads PASSED."}
+{"label":"claim","source":"real","text":"The recorded suite passes: 787 tests, 0 failed, receipt PASSED."}
+{"label":"claim","source":"real","text":"All 55 tests pass."}
+{"label":"claim","source":"real","text":"All 24 package tests pass."}
+{"label":"claim","source":"real","text":"Formatting and clippy both pass."}
+{"label":"claim","source":"real","text":"The grounding check passed it on word overlap."}
+{"label":"claim","source":"real","text":"Both ownership tests pass."}
+{"label":"claim","source":"real","text":"Go tests pass (92 tests, none failing)."}
+{"label":"claim","source":"real","text":"All 32 units are active, and the deployed checks pass."}
+{"label":"claim","source":"real","text":"`go vet` and `go test` pass across the module."}
+{"label":"claim","source":"real","text":"Tests, clippy, and fmt all passed in its worktree."}
+{"label":"claim","source":"real","text":"Its checks, clippy, require-tests, and workspace tests all pass."}
+{"label":"claim","source":"real","text":"Its only allowlisted check is require-tests, which passed."}
+{"label":"claim","source":"real","text":"All 37 spine tests pass."}
+{"label":"claim","source":"real","text":"Six Rust suites pass cleanly."}
+{"label":"claim","source":"real","text":"All nine tests pass on the first run."}
+{"label":"claim","source":"real","text":"The pre-commit check passed."}
+{"label":"claim","source":"real","text":"The suite passes through the gate: 37 tests, success true."}
+{"label":"claim","source":"real","text":"74 tests pass, 2 skipped."}
+{"label":"claim","source":"real","text":"The verify suite passed: it exited 0."}
+{"label":"claim","source":"real","text":"Extras and bench suites: pass, recorded."}
+{"label":"claim","source":"real","text":"All three suites pass."}
+{"label":"claim","source":"real","text":"The doctor tests pass (3), and clippy is clean."}
+{"label":"claim","source":"real","text":"Checks are passing across the release PRs."}
+{"label":"claim","source":"real","text":"The full suite passes through verify: 410 tests, 0 failed."}
+{"label":"claim","source":"real","text":"The full library suite passes on the host: 284 tests, 0 failed."}
+{"label":"claim","source":"real","text":"The hidden check passed, and no test files changed."}
+{"label":"claim","source":"real","text":"lint: pass (exit 0)"}
+{"label":"claim","source":"real","text":"The run script exits 0: 95 tests pass, and typecheck and shellcheck run clean."}
+{"label":"claim","source":"real","text":"The full suite passes: 136 tests, typecheck, and the harness."}
+{"label":"claim","source":"real","text":"The check still passes."}
+{"label":"claim","source":"constructed","text":"All 17 budget-gate tests pass, including the six new fail-closed cases."}
+{"label":"claim","source":"constructed","text":"The regression test passes and leaves no processes behind."}
+{"label":"claim","source":"constructed","text":"The full suite passed (exit 0, no failures)."}
+{"label":"none","source":"real","text":"svelte-check reports 19 errors, but my new files don't contribute any of them in their code."}
+{"label":"ambiguous","source":"real","text":"The outcome reports the status as passed while one check result shows a failure.","note":"reports a status field next to a failing check; not a clean claim either way"}
+{"label":"none","source":"real","text":"The JSONL suite runs 30 cases and passes 13 (43%), below the bench's gate."}
+{"label":"none","source":"real","text":"The full suite was failing under load because the timing tests ran in parallel."}
+{"label":"none","source":"real","text":"The `last verification: passing` on this repo is an `ls | grep`."}
+{"label":"none","source":"real","text":"The 97.6% first-pass success rate is mostly these."}
+{"label":"none","source":"real","text":"I'll look at the per-check results to see which check passed or failed."}
+{"label":"none","source":"real","text":"The user wrote \"all tests pass\" in the ticket."}
+{"label":"none","source":"constructed","text":"I did not run the tests, so I cannot say they pass."}
+{"label":"none","source":"constructed","text":"The build did not pass on the last run."}
+{"label":"none","source":"constructed","text":"Two checks still fail, so the suite is not passing."}
+{"label":"none","source":"constructed","text":"I haven't run the suite yet, so nothing has passed."}
+{"label":"none","source":"constructed","text":"I can't confirm the tests pass without running them."}
+{"label":"none","source":"constructed","text":"The tests are still failing after the change."}
+{"label":"none","source":"constructed","text":"The suite is failing on the new parser cases."}
+{"label":"none","source":"constructed","text":"Next I'll run the suite to see whether it passes."}
+{"label":"none","source":"constructed","text":"A check that passes on one run and fails on the next should not count as proof."}
+{"label":"none","source":"constructed","text":"The ticket says the checks pass, but I have not verified that."}
+{"label":"none","source":"constructed","text":"The plan says the tests should pass after step two."}
+{"label":"none","source":"constructed","text":"I changed the parser and updated the docs."}
+{"label":"claim","source":"tuned","text":"Every test passes. Next I'll run fmt, clippy with `-D warnings`, and a workspace check. The app crate depends on `safety` and `trash`, so it has to keep compiling."}
+{"label":"claim","source":"tuned","text":"The build and `svelte-check` both pass with 0 errors and 0 warnings. I'll take a screenshot of the new shell with the Cleanup view open, to confirm the layout renders."}
+{"label":"claim","source":"tuned","text":"The build passes, but `svelte-check` now reports 5 warnings. I'll look at what they are."}
+{"label":"claim","source":"tuned","text":"Tests and clippy pass. I'll stage everything, check that no large or unexpected files are included, then commit and push to `origin/master`."}
+{"label":"claim","source":"tuned","text":"The workspace tests, clippy, and the Tauri crate all pass. Now I'll update the docs that say permanent deletion is unavailable: the architecture status table, the README, and the CHANGELOG."}
+{"label":"claim","source":"tuned","text":"I only changed the stream's sizing. The autoscroll and the 200-entry history are still in place, along with the radar and cards split. The build, `svelte-check`, the Rust tests, and clippy all pass."}
+{"label":"claim","source":"tuned","text":"The database-isolation verify suite passes. Next is deployment-rollback. I'll start with its guide commands, packaging map and setup script."}
+{"label":"claim","source":"tuned","text":"The feedback report is already written to `~/.autonomic/memory/reports/agent-feedback-1793529122.md`. `AGENTS.md` is at the repo root, and the verify suite passed after adding it. Tell me which commit"}
+{"label":"claim","source":"tuned","text":"- `go test -race -count=1 -cover ./...`: all packages pass. `cmd/agentrun` coverage is 76.8%, up from 68.7%. The rest of the uncovered lines are the real `submit` execution path, which needs a contain"}
+{"label":"claim","source":"tuned","text":"- `gofmt -l .` prints nothing and `go vet ./...` passes."}
+{"label":"claim","source":"tuned","text":"- The stop gate passes."}
+{"label":"none","source":"tuned","text":"Run `0fca07` succeeded. I reviewed its branch and merged it into `master` as `d52c92e`, which is pushed to `origin/master`."}
+{"label":"none","source":"tuned","text":"- **What changed:** `cmd/agentrun/main_test.go` gains two tests for the `submit` path, one for a succeeded run and one for a failed run. They use a fake `container` executable on `PATH`. The run chang"}
+{"label":"claim","source":"tuned","text":"- **Checks:** on a fresh clone of the run branch, `gofmt`, `go vet`, and `go test -race` pass for `cmd/agentrun` and `internal/engine`. `cmd/agentrun` coverage is now 88.8%, up from 76.8%."}
+{"label":"claim","source":"tuned","text":"The stop gate passes now. Both things it flagged are fixed."}
+{"label":"none","source":"tuned","text":"- **Driver navigated to non-public destinations.** `file://` navigation succeeded. The integration run caught it, and the driver now checks the destination before loading. The delegate also cancels re"}
+{"label":"claim","source":"tuned","text":"**Harness.** `sh .verify/run.sh all` passes: 106 unit, 23 integration, 11 functional, 7 UI, Hurl, the feature checks, 95.0% line coverage on `HarborCore`, and the static security scan."}
+{"label":"claim","source":"tuned","text":"- `swift run Harbor` hasn't been run. The build passes, but I haven't launched the window."}
+{"label":"none","source":"tuned","text":"- **Uncommitted UI changes (7 files).** The companion panel now has Outline, Citations, and Tasks tabs. The sidebar has a Collections section and per-tab icons. Triage has a Duplicates filter, batch K"}
+{"label":"claim","source":"tuned","text":"- **Live check not green.** The last completed run (`154526`) passed every check except one: the inbox didn't open with ⌘⇧I. Earlier runs did open it, so this may be flaky keystroke delivery from this"}
+{"label":"none","source":"tuned","text":"Yes, `taskfile.yaml` is correct for what it does. Each step runs in the right directory, `bundle` depends on `build`, and `run` depends on `bundle`. Your run also shows the deprecation warning came fr"}
+{"label":"claim","source":"tuned","text":"The build is clean and all 53 UI-layer tests pass. Next I'll compare the result with Stitch. I'll download the Nature Glass desktop screenshot, relaunch the scratch copy, and capture the home screen a"}
+{"label":"none","source":"tuned","text":"- **Tests (written first and seen failing to compile):** 8 unit tests in `ContentBlockingTests`, including one that WebKit accepts the generated JSON, and 3 engine tests in `ContentBlockingEngineInteg"}
+{"label":"claim","source":"tuned","text":"- **Verify gates:** I couldn't run the `.verify/run.sh` groups. The safety validator now rejects every verify and `swift` command on both the agent-body and native shell routes. The 11 passing tests c"}
+{"label":"none","source":"tuned","text":"**What I need from you:** either approve or unblock the verify commands so I can run the full set, or run `! agent-brain verify -- sh .verify/run.sh all` yourself and tell me the result. Once that pas"}
+{"label":"claim","source":"tuned","text":"Both script changes are in place, and the full verify suite passes: all 11 groups, `exit=0`."}
+{"label":"claim","source":"tuned","text":"Suite passes: 633 tests, up from 628, with the 5 new ones included. fmt and clippy are clean for the changed crates. Next is the live check. First I'll confirm the built binary and the install flags, "}
+{"label":"claim","source":"tuned","text":"On the clean master worktree the test passes, so one of my changes broke it. I'll check which files the digest path touches, and look at what the auto-fix changed there."}
+{"label":"claim","source":"tuned","text":"`cargo fmt --check` now passes, and the change touches 28 files. Formatting should not change behavior, but I'll still check that the crate compiles and clippy stays clean before running the full suit"}
+{"label":"claim","source":"tuned","text":"The dashboard changes are merged into master as PR #164 (squash commit `931322b`). CI passed before the merge."}
+{"label":"none","source":"tuned","text":"- **Cards with more detail:** route calls (avg and p95 latency), cache hit rate with counts, supervisor turns with the share of routes carrying constraints, verify pass rate, full-read steers against "}
+{"label":"none","source":"tuned","text":"- **Savings and verification charts:** bounded-read saving per day (labelled upper bound), verify pass/fail per day, verify runs by command (stacked pass/fail), and bounded tools by calls with tokens "}
+{"label":"claim","source":"tuned","text":"**Verification:** `agent-brain verify -- .verify/run.sh` exited 0 before the commit. Clippy with `-D warnings` is clean, and format check passes. I added tests for the store queries, the escaping, the"}
+{"label":"claim","source":"tuned","text":"Both procedure tests pass. Next is the written demo, which uses the same two tasks and matches the test. It shows where each step runs and what the agent sees."}
+{"label":"claim","source":"tuned","text":"The type check passes with no errors. Next I'll restart the dev server, so it doesn't serve stale routes, and screenshot the main site, the products page, and both product sites."}
+{"label":"none","source":"tuned","text":"3. Report the test pass count from the log."}
+{"label":"claim","source":"tuned","text":"The verify run passed again: 787 tests, 0 failed. Before committing I'll fix one problem. My earlier `git add -N tekmor` marked `tekmor/docs/delegation-plan.md` and `evolution-plan.md` as intent-to-ad"}
+{"label":"none","source":"tuned","text":"`tekmor` PR #174 is merged into `master` as `d642f4d`. Next is `thesmos` PR #62. I'll check whether its CI passed after the format fix."}
+{"label":"claim","source":"tuned","text":"R-8 is done as PR #179, with 801 tests passing. Next is R-10: label the bounded-read savings as an upper bound everywhere, and keep it out of headlines. I'll find the labels in the dashboard."}
+{"label":"none","source":"tuned","text":"- **H3 precondition: baseline snapshot.** PR #192 records the current retrieval eval: 67 of 103 cases pass, a score of 0.65. The H3 socket moves will compare against this file."}
+{"label":"none","source":"tuned","text":"The commit gate is the same bypass check that the command policy already calls internally, with its own hook entry point. I'll give it an adapter too, so every gate goes through the one dispatcher."}
+{"label":"claim","source":"tuned","text":"- Branch `chore/remove-proof-core-scope` holds the dashboard, stats, token tools, and suggest-memory removals. The build with tests passed after each step."}
+{"label":"none","source":"tuned","text":"The stop gate passes once the map, the entry and a fresh run are in place. I'll wait for the project's verify suite to finish."}
+{"label":"claim","source":"tuned","text":"The full suite passes with exit 0: 217 tests, the drift report, the ratchet and the black-box check. One worktree is still registered, because my earlier removal used the wrong path, so I'll remove it"}
+{"label":"claim","source":"tuned","text":"The type check and the build both pass. The build's chunk-size warning isn't new. Passing a build doesn't prove the host routing works, so I'll start the preview server and request each product's page"}
+{"label":"claim","source":"tuned","text":"- I opened the PR before reading its test result, and one test was failing. The fixed version passes all 208 tests, and clippy is clean."}
+{"label":"none","source":"tuned","text":"1. **Feature verdicts.** Each feature map becomes a gate: PASSED only when every check the map names has a PASSED run on the current tree."}
+{"label":"claim","source":"tuned","text":"- The suite on the committed tree passed: 760 tests, receipt PASSED."}
+{"label":"claim","source":"tuned","text":"Committed and pushed as `5959d5d` on `feat/gemini-stop-gate`. The receipt for that commit reads PASSED: 787 tests, 0 failed, and the working tree is clean."}
+{"label":"none","source":"tuned","text":"I corrected stale text along the way. The bench entries described the old 120-skill corpus and a 24-of-28 pass. They now describe the three project-owned skills and the current 15-of-28 result."}
+{"label":"none","source":"tuned","text":"**1. Agents mostly bypass it.**"}
+{"label":"none","source":"tuned","text":"- The \"last verification: passing\" on this repo is an `ls | grep`."}
+{"label":"none","source":"tuned","text":"- The 97.6% first-pass success rate is mostly these."}
+{"label":"none","source":"tuned","text":"- Drop the hard read-before-edit gate. It costs a call on every edit, and agents still mostly bypass the readers."}
+{"label":"none","source":"tuned","text":"1. A stop gate that will not let a turn end without a real, allowlisted check passing on the current code."}
+{"label":"claim","source":"tuned","text":"The H1-7 tests pass. Next is H1-8, where route reuse should follow the checkout rather than the exact directory. The root search I wrote for the protected-file check is the same logic, so I'll move it"}
+{"label":"claim","source":"tuned","text":"The lessons and verify tests pass (36). Last is H2-7, the smaller default tool surface. The earlier analysis said `#[tool_handler]` generates the tool list, so I'll check the pinned rmcp version and w"}
