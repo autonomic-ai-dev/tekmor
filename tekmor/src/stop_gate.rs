@@ -53,7 +53,7 @@ pub enum StopOutcome {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Decision {
     Allow,
-    Block(&'static str),
+    Block,
 }
 
 fn proof_line(cmd: &str, code_hash: Option<&str>) -> String {
@@ -88,7 +88,7 @@ pub fn decide(verified: bool, blocks_so_far: u32) -> Decision {
     if verified || blocks_so_far >= STOP_BLOCK_LIMIT {
         Decision::Allow
     } else {
-        Decision::Block(BLOCK_REASON)
+        Decision::Block
     }
 }
 
@@ -156,8 +156,8 @@ fn named_reason(root: &Path, reason: &str) -> String {
     format!("Repo {} is blocked: {reason}", repo_name(root))
 }
 
-fn last_edit_ms(root: &Path) -> Option<i64> {
-    changed_paths(root)
+fn last_edit_ms(root: &Path, changed: &[String]) -> Option<i64> {
+    changed
         .iter()
         .filter_map(|path| root.join(path).metadata().ok()?.modified().ok())
         .filter_map(|modified| modified.duration_since(UNIX_EPOCH).ok())
@@ -175,13 +175,13 @@ fn markdown_names(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-fn feature_gap(root: &Path) -> Option<String> {
+fn feature_gap(root: &Path, changed: &[String]) -> Option<String> {
     let features_dir = root.join(".verify/features");
     if !features_dir.is_dir() {
         return None;
     }
     feature_map::gap(
-        &changed_paths(root),
+        changed,
         &feature_map::load(&features_dir),
         &markdown_names(&root.join(".verify/knowledge-base")),
     )
@@ -324,11 +324,12 @@ fn evaluate_stop(
     state_file: &Path,
     mode: GateMode,
 ) -> Result<StopOutcome> {
-    let Some(edit) = last_edit_ms(root) else {
+    let changed = changed_paths(root);
+    let Some(edit) = last_edit_ms(root, &changed) else {
         return Ok(StopOutcome::Clear);
     };
-    let gap = feature_gap(root);
-    let code_changed = changed_paths(root)
+    let gap = feature_gap(root, &changed);
+    let code_changed = changed
         .iter()
         .any(|path| verify::is_code_path(path) || verify::is_proof_input(path));
     let evidence = load_evidence(store, root)?;
@@ -367,12 +368,12 @@ fn evaluate_stop(
         return Ok(StopOutcome::HandBack(reason));
     }
     let verdict = match &gap {
-        Some(_) if blocks < STOP_BLOCK_LIMIT => Decision::Block(BLOCK_REASON),
+        Some(_) if blocks < STOP_BLOCK_LIMIT => Decision::Block,
         Some(_) => Decision::Allow,
         None => decide(passed, blocks),
     };
     match verdict {
-        Decision::Block(_) => {
+        Decision::Block => {
             let next = BlockState {
                 session_id: session_id.to_string(),
                 edit_ms: edit,
@@ -427,7 +428,7 @@ mod tests {
 
     #[test]
     fn blocks_code_change_without_a_run_for_its_tree() {
-        assert!(matches!(decide(false, 0), Decision::Block(_)));
+        assert!(matches!(decide(false, 0), Decision::Block));
     }
 
     #[test]
@@ -492,7 +493,7 @@ mod tests {
     fn keeps_blocking_below_the_block_limit() {
         assert!(matches!(
             decide(false, STOP_BLOCK_LIMIT - 1),
-            Decision::Block(_)
+            Decision::Block
         ));
     }
 
@@ -566,7 +567,7 @@ mod tests {
             .status()
             .unwrap();
         std::fs::write(dir.path().join("note.txt"), "edit").unwrap();
-        assert!(last_edit_ms(dir.path()).is_some_and(|ms| ms > 0));
+        assert!(last_edit_ms(dir.path(), &changed_paths(dir.path())).is_some_and(|ms| ms > 0));
     }
 
     #[test]
@@ -578,7 +579,7 @@ mod tests {
             .args(["init", "-q"])
             .status()
             .unwrap();
-        assert_eq!(last_edit_ms(dir.path()), None);
+        assert_eq!(last_edit_ms(dir.path(), &changed_paths(dir.path())), None);
     }
 
     fn edited_repo(dir: &Path, verify_toml: Option<&str>) {
