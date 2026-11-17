@@ -35,6 +35,14 @@ async fn main() -> Result<()> {
 
     match cmd {
         "install" => {
+            if let Some(flag) = args[2..]
+                .iter()
+                .find(|a| !matches!(a.as_str(), "--global" | "-g" | "--quiet"))
+            {
+                anyhow::bail!(
+                    "unknown install option `{flag}`; supported: --global (-g), --quiet"
+                );
+            }
             let user = args.iter().any(|a| a == "--global" || a == "-g");
             let quiet = args.iter().any(|a| a == "--quiet");
             host_hooks::install_claude_code_hooks(user, quiet)?;

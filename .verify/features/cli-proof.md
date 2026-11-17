@@ -35,8 +35,8 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
   - Behaviour: `gate_events.rs` writes `gate-events.jsonl` under the logs directory.
   - Outcome: Gate decisions can be reviewed after the fact.
 - `claude-gate-hooks`: Registers the gates in Claude Code settings.
-  - Behaviour: `tekmor install [--global]` writes a PreToolUse Bash entry (`bash-gate`) and a Stop entry (`stop-gate`) into the settings file (`host_hooks.rs`).
-  - Outcome: Only the two proof gates are registered.
+  - Behaviour: `tekmor install [--global] [--quiet]` writes a PreToolUse Bash entry (`bash-gate`) and a Stop entry (`stop-gate`) into the settings file (`host_hooks.rs`). Any other option fails before anything is written (`tests/install.rs`).
+  - Outcome: Only the two proof gates are registered, and a host flag that is not supported cannot install them by accident.
 - `extensions`: Installs and runs optional extension binaries.
   - Behaviour: `tekmor ext list|add|remove` (`extensions.rs`, `registry_sync.rs`). Extensions are kept for later use; none are bundled.
   - Outcome: The extension mechanism is present without any bundled extension.
