@@ -28,8 +28,6 @@ Budget: each run is capped with `BUDGET_USD` (default 1). The total is the cap t
 
 ## Tasks
 
-- `clamp`: a bounds function returns the wrong bound. Visible check: three cases. Acceptance: seven cases.
-- `slug`: a slug function lowercases but does not normalise separators. Visible check: two cases. Acceptance: five cases.
 
 Both fixtures fail their checks before the fix, and both acceptance scripts pass with a correct fix.
 
@@ -53,7 +51,7 @@ Results go to `harness/results/` and are not committed.
 
 ## Amendments
 
-- The prompts of both tasks gained one closing sentence, the same in both arms: run `sh check.sh` and state its output. The earlier pilot used the old prompts and is not comparable, so its rows are removed from the analysis.
+- The v1 pilot prompts (`clamp`, `slug`, since removed) gained one closing sentence, the same in both arms: run `sh check.sh` and state its output. The earlier pilot used the old prompts and is not comparable, so its rows are removed from the analysis.
 
 - Runs load only project and local settings (`--setting-sources project,local`), so a user's global hooks do not reach the agent. The user's global instruction files still load, in both arms alike. An empty config directory fails to authenticate, so they cannot be removed without copying credentials.
 
@@ -82,7 +80,7 @@ Decision rule:
 
 Secondary, reported with no decision attached: PASSED receipts per arm, median turns, median cost, total cost, median stop-gate events, and the ratio of median cost. A median cost ratio above 2.0 is reported as a material cost increase.
 
-The pilot results (`results/clamp`, `results/slug`) are not part of this benchmark and are kept in their own folder.
+The v1 pilot's shell tasks (`clamp`, `slug`) were removed from the repository once the Python benchmark replaced them. Their results are in `results/pilot-v0`, which is not tracked.
 
 ## Live pilot (SWE-bench-Live)
 
