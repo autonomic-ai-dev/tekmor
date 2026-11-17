@@ -140,6 +140,17 @@ fn check_allowlist(root: &Path) -> Vec<Finding> {
         .collect()
 }
 
+fn check_drift(root: &Path) -> Vec<Finding> {
+    let drift = crate::drift::check(root);
+    if drift.is_empty() {
+        return vec![finding(true, "drift", "feature maps match the code and the allowlist")];
+    }
+    drift
+        .into_iter()
+        .map(|d| finding(false, "drift", format!("{}: {}", d.feature, d.problem)))
+        .collect()
+}
+
 fn check_store() -> Vec<Finding> {
     let Ok(config) = crate::config::Config::load() else {
         return vec![finding(false, "store", "cannot resolve TEKMOR_HOME")];
@@ -161,6 +172,7 @@ pub fn run(root: &Path) -> Result<bool> {
     findings.extend(check_git(root));
     findings.extend(check_allowlist(root));
     findings.extend(check_store());
+    findings.extend(check_drift(root));
     let mut all_ok = true;
     for f in &findings {
         let tag = if f.ok { "ok  " } else { "FAIL" };
@@ -173,6 +185,19 @@ pub fn run(root: &Path) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reports_a_feature_map_that_points_at_missing_code() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join(".verify/features")).expect("features dir");
+        std::fs::write(
+            dir.path().join(".verify/features/app.md"),
+            "---\nfeature: app\n---\n\n# app\n\n## Code\n\n- `src/missing.rs`\n",
+        )
+        .expect("feature map");
+        let findings = check_drift(dir.path());
+        assert!(findings.iter().any(|f| !f.ok && f.detail.contains("missing")), "{:?}", findings.iter().map(|f| f.detail.clone()).collect::<Vec<_>>());
+    }
 
     #[test]
     fn finds_tekmor_hook_binaries_in_settings() {
