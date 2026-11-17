@@ -83,3 +83,7 @@ Decision rule:
 Secondary, reported with no decision attached: PASSED receipts per arm, median turns, median cost, total cost, median stop-gate events, and the ratio of median cost. A median cost ratio above 2.0 is reported as a material cost increase.
 
 The pilot results (`results/clamp`, `results/slug`) are not part of this benchmark and are kept in their own folder.
+
+## Live pilot (SWE-bench-Live)
+
+Setup, per-task results and limitations are in [LIVE-PILOT.md](LIVE-PILOT.md). The pilot covers seven tasks at one repetition and cannot show a tekmor effect.
