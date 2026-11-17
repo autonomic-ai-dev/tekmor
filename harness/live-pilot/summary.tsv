@@ -1,0 +1,15 @@
+task	arm	verdict	turns	cost_usd	stop_blocks	tekmor_verify_calls	patch_bytes
+aws-cloudformation__cfn-lint-3890	control	success	12	0.0073	0	0	2909
+aws-cloudformation__cfn-lint-3890	tekmor	success	25	0.0164	3	6	1518
+cyclotruc__gitingest-115	control	failure	6	0.0037	0	0	983
+cyclotruc__gitingest-115	tekmor	failure	9	0.0058	1	1	983
+instructlab__instructlab-2592	control	failure	11	0.0088	0	0	2419
+instructlab__instructlab-2592	tekmor	failure	30	0.0261	1	1	9105
+kedro-org__kedro-4408	control	failure	39	0.0204	0	0	699
+kedro-org__kedro-4408	tekmor	failure	36	0.0238	5	4	699
+kubernetes-client__python-2303	control	success	14	0.0099	0	0	3840
+kubernetes-client__python-2303	tekmor	success	14	0.0089	1	1	3601
+streamlink__streamlink-6361	control	failure	12	0.0094	0	0	1534
+streamlink__streamlink-6361	tekmor	failure	37	0.0264	3	2	2519
+yt-dlp__yt-dlp-11880	control	failure	13	0.0109	0	0	869
+yt-dlp__yt-dlp-11880	tekmor	failure	21	0.0157	1	5	779
