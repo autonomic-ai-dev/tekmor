@@ -1,1 +1,1 @@
-python3 -I check.py
+python3 -B -I check.py
