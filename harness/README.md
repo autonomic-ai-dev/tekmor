@@ -87,3 +87,79 @@ The pilot results (`results/clamp`, `results/slug`) are not part of this benchma
 ## Live pilot (SWE-bench-Live)
 
 Setup, per-task results and limitations are in [LIVE-PILOT.md](LIVE-PILOT.md). The pilot covers seven tasks at one repetition and cannot show a tekmor effect.
+
+## Revision 2: pre-registered before the v2 run
+
+The v1 run (`results/superseded-design-v1`) was stopped after about 280 runs and is not analysed. Its tekmor arm had a `.verify/` scaffold that the control arm lacked, so its primary comparison mixed the scaffold with the gates. Its runs also recorded no transcript, so the mechanism could not be checked. Revision 2 fixes both before any v2 run.
+
+Arms, all with the same fixture, prompt, model setting, budget cap and settings:
+- `control`: the fixture only.
+- `scaffold`: the fixture plus `.verify/verify.toml` (allowlist `sh check.sh`), a feature map and a knowledge-base entry. No gate hooks.
+- `tekmor`: the scaffold plus the project-level gate hooks from `tekmor install`.
+
+The prompt in every arm already tells the agent to run `sh check.sh` and state its output, so "be told to verify" is held constant. Only the scaffold and the gates differ between arms.
+
+Estimand: the effect on these 50 fixed tasks. This study makes no claim about tasks like these, and the tasks are synthetic.
+
+Primary comparison: `tekmor` minus `control`, which is the shipped product against no product.
+Secondary comparisons, both with a decision: `tekmor` minus `scaffold` (the effect of the gates beyond the scaffold), and `scaffold` minus `control` (the effect of the scaffold alone).
+
+Effect and interval: as in v1. Per task, the accepted rate in one arm minus the other. The headline is the mean across tasks. The 95% interval comes from a cluster bootstrap over tasks and repetitions, with 5000 resamples and seed 20261117.
+
+Decision rule, applied to each comparison:
+- Interval above zero: the first arm accepts more.
+- Interval below zero: the first arm accepts less.
+- Otherwise: no detectable difference at this sample size. This is not reported as "no effect".
+
+Mechanism outcomes, reported per arm with no decision attached:
+- `check_runs`: Bash calls whose command contains `check.sh`, taken from the transcript.
+- `claimed_pass`: the final message matches `pass`, `passes` or `passed`. This is a heuristic, and it can match a negated sentence.
+- `unverified_claim`: `claimed_pass` with zero check runs. This is the failure the gate is meant to stop.
+- `stop_blocks` and `stop_handbacks`: stop-gate events from the gate log.
+- `blocks_in_accepted_runs`: runs with at least one block that were accepted in the end. This is a proxy for false blocks, not a measure of them. A block on work that was finished but had no receipt can only be classed as false with per-turn ground truth, which this study does not collect.
+- `PASSED_receipts`, `median_turns`, `median_cost`, `total_cost`.
+
+Hidden-test leakage: `leak_refs` counts tool calls whose input mentions `hidden.py`, `accept.sh` or `harness/tasks`. Any run with `leak_refs` above zero is excluded from the primary analysis and reported separately. The hidden tests live in the main repository, so an agent with unrestricted file access could in principle read them. This check is the evidence that it did not.
+
+Null result: if every decisive comparison's interval includes zero, the study reports "no detectable effect of tekmor on these 50 synthetic tasks at 10 repetitions". It does not change any product claim beyond that. The next study uses real-repository tasks, with its sample size calculated before it runs. If the mechanism counts show the gate blocking and acceptance not moving, the next step is to read the blocked turns, not to add features.
+
+Stopping: every task runs 10 repetitions per arm. The only early stop is the budget ceiling. Stopping on the interval is not allowed.
+
+Budget: 3 arms × 50 tasks × 10 repetitions = 1500 runs. Each run is capped at `BUDGET_USD` (default $1). The matrix stops before a repetition if the recorded total reaches `CEILING_USD` (default $60). The smoke runs cost about $0.003 for control and scaffold and $0.014 for tekmor on one task, so the expected total is about $15.
+
+Run: `RESULTS_DIR=results/bench-v2 REPS=10 PAR=4 CEILING_USD=60 ./run_matrix.sh`, then `python3 analyze.py results/bench-v2`.
+
+## Revision 3: playbook arm, pre-registered before the playbook runs
+
+Question: does the binary change outcomes beyond the same checks written as instructions? A team could get the same instruction with no binary, so this is the comparison that decides whether tekmor is worth using over a playbook.
+
+Arm `playbook`: the fixture plus `CLAUDE.md` containing `playbook.md` (the instructions a team would write without the binary). No `.verify/` files, no hooks, no receipts. Claude Code reads `CLAUDE.md`, not `AGENTS.md`, so the instructions go there. Same tasks, prompt, budget, settings and repetitions.
+
+Text of the playbook, as it is in `playbook.md`:
+
+> Before you tell the user a change is finished: run `sh check.sh` from the repository root; read its output and say a check passed only if its output says PASS; if it fails, fix the code and run it again; in your final message, copy the exact final output of `sh check.sh`. Do not edit check.sh or check.py.
+
+Decisive comparisons, four in total: tekmor minus control (primary, from revision 2), tekmor minus scaffold, scaffold minus control, and tekmor minus playbook. The decision for tekmor minus playbook is the one that answers whether the binary is worth using:
+- Interval above zero: tekmor accepts more than the playbook.
+- Interval below zero: the playbook accepts more.
+- Otherwise: no detectable difference. The binary is not shown to add acceptance over a playbook. The product's case then rests on the receipt record and the enforcement, and no acceptance gain is claimed.
+
+Multiple comparisons: the four decisive comparisons share one family, so each interval uses the Bonferroni-adjusted level, 98.75% (tail 0.0125). Playbook minus control is reported descriptively and unadjusted. This level change is recorded here before any v2 analysis was run. The revision-2 rule stated 95%, and the v2 results have not been analysed.
+
+Mechanism outcomes for the playbook arm are reported in the same way as the others. The key comparison is the unverified-claim rate: a pass claim with no check run, playbook against tekmor. That is where a gate should differ from an instruction.
+
+Run order: revision-2 matrix first (complete, 1500 runs). Then the playbook arm, 500 runs, into the same results folder with `ARMS=playbook`. Then `python3 analyze.py` on the combined results.
+
+## Revision 3.1: quota failures and a task defect, pre-registered before the rerun
+
+Quota failures. The first playbook matrix hit the account's usage limit (HTTP 429, "5-hour limit"). 333 of its 500 runs failed on that error, in reps 4 to 10, before the agent took any action. These are infrastructure failures, not outcomes of the arm, and revision 3 counted them as attempts. This revision replaces that rule for these runs only. The 333 failed cells are rerun once with the same arm, prompt, budget and settings, after a test run confirmed quota was available. The original transcripts go to `quota-errors/` and their rows to `quota-errors.jsonl`. Neither is analysed. A cell that errors again on rerun is reported as an error and counted as a failed attempt. The primary analysis uses one row per task, arm and repetition: the rerun row where a rerun happened, and the original row otherwise.
+
+Task b17_get_path. Its hidden test requires the default when an intermediate value is not a mapping (case `({'a': 0}, 'a.b', 9)`). The issue text does not describe that case. All 30 runs of this task scored 0 across the four arms. It stays in the primary analysis. A sensitivity analysis without it is reported next to the primary one. No arm differs on it, so excluding it does not change any comparison. The task is not edited during the study.
+
+Observed before the rerun, reported as observed and not as a finding: in the three arms that completed, the visible check was run in every run (control and scaffold median 2 check runs, tekmor median 4), so the unverified-claim count was 0 in every arm. The failure the gate targets did not occur in these tasks, because the prompt already tells the agent to run the check. Acceptance was 98% in control and scaffold.
+
+## Corrections (2026-11-17)
+
+- The v2 run has 2000 runs: four arms (control, scaffold, tekmor, playbook) of 500 each. The playbook arm's 333 quota-failed runs were rerun under revision 3.1. The earlier 1000 and 1500 figures are out of date.
+- The v2 tasks are at ceiling. `validate_tasks.py --calibration <metrics.jsonl>` reports every task whose control acceptance is outside 0.2 to 0.8. Against v2, all 50 are outside that band, so v2 cannot measure the product.
+- Generated checks and hidden tests run with `python3 -B -I`, so bytecode cannot hide an edit or enter the tree hash. Tasks generated before this change used `python3 -I`.
