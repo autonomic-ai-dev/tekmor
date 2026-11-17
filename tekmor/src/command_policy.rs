@@ -840,9 +840,12 @@ pub fn run_bash_gate() -> Result<()> {
         root: root.as_deref(),
         rules: &rules,
     };
+    let nudge = AllowlistNudge {
+        root: root.as_deref(),
+    };
     let command = input.tool_input.command;
     match evaluate(
-        &[&command_rule],
+        &[&command_rule, &nudge],
         &GateInput {
             tool: "Bash",
             command: Some(&command),
@@ -882,6 +885,30 @@ impl GateRule for CommandRule<'_> {
     }
 }
 
+pub struct AllowlistNudge<'a> {
+    pub root: Option<&'a Path>,
+}
+
+impl GateRule for AllowlistNudge<'_> {
+    fn check(&self, input: &GateInput<'_>) -> GateVerdict {
+        let Some(command) = input.command.map(str::trim) else {
+            return GateVerdict::Allow;
+        };
+        let Some(root) = self.root else {
+            return GateVerdict::Allow;
+        };
+        if crate::verify::load_command_allowlist(root)
+            .iter()
+            .any(|allowed| allowed.trim() == command)
+        {
+            return GateVerdict::Warn(format!(
+                "Bare `{command}` does not produce a receipt. Run `tekmor verify -- {command}` instead."
+            ));
+        }
+        GateVerdict::Allow
+    }
+}
+
 fn record_gate_event(kind: &str, reason: &str) {
     let Ok(config) = crate::config::Config::load() else {
         return;
@@ -898,6 +925,35 @@ mod tests {
     use super::*;
 
     const ROOT: &str = "/work/repo";
+
+    #[test]
+    fn bare_allowlisted_command_is_nudged_toward_verify() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".verify")).unwrap();
+        std::fs::write(
+            dir.path().join(".verify/verify.toml"),
+            "[verify]\ncommands = [\"sh check.sh\"]\n",
+        )
+        .unwrap();
+        let nudge = AllowlistNudge {
+            root: Some(dir.path()),
+        };
+        let check = |command: &str| {
+            nudge.check(&GateInput {
+                tool: "Bash",
+                command: Some(command),
+            })
+        };
+        match check("sh check.sh") {
+            GateVerdict::Warn(reason) => {
+                assert!(reason.contains("tekmor verify -- sh check.sh"), "{reason}")
+            }
+            other => panic!("expected a warning, got {other:?}"),
+        }
+        assert!(matches!(check("tekmor verify -- sh check.sh"), GateVerdict::Allow));
+        assert!(matches!(check("echo hi"), GateVerdict::Allow));
+    }
+
     const CASES: &str = include_str!("command_policy_cases.txt");
 
     #[test]
