@@ -13,14 +13,13 @@ brew tap autonomic-ai-dev/tap
 brew install tekmor
 ```
 
-## 2. Connect your coding host
+## 2. Connect Claude Code
 
 ```bash
-tekmor install --global --claude-code   # or --cursor, --codex, --gemini, --opencode, --antigravity, --vscode
-tekmor doctor
+tekmor install --global
 ```
 
-Run `tekmor install --all` to configure every supported host. See [the support matrix](support-matrix.md) for what each host gets.
+This registers the `bash-gate` and `stop-gate` hooks in `~/.claude/settings.json`. Without `--global` it writes `.claude/settings.json` at the root of the current repository instead. Claude Code is the only host tekmor configures. `install` rejects other host flags, so a request for another host fails rather than installing Claude Code hooks by mistake.
 
 ## 3. Initialise verification in your project
 
@@ -30,7 +29,7 @@ From the root of a git repository with at least one commit:
 tekmor verify init
 ```
 
-This creates `.verify/verify.toml`. Its `commands` list is the allowlist. The default list depends on the files it finds: `cargo test` for a Cargo project, `npm test` for a Node project, and `make test` when a `Makefile` exists.
+This creates `.verify/verify.toml`. Its `commands` list is the allowlist. The default list depends on the files it finds. A Cargo project gets `cargo test`, `cargo clippy` and `cargo check`. A Node project gets its test script through the package manager its lockfile names (`npm`, `pnpm`, `yarn` or `bun`). Python gets `pytest`, Go gets `go test ./...`, and a `Makefile` gets `make test`. If nothing is detected, the allowlist is empty and `init` says so. Check the generated list before you rely on it.
 
 ## 4. Run the verify command
 
