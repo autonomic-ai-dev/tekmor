@@ -29,7 +29,7 @@ for rep in $(seq 1 "$REPS"); do
   fi
   echo "rep $rep (recorded cost so far \$$total)"
   for task in $tasks; do
-    for arm in control tekmor; do
+    for arm in control scaffold tekmor; do
       echo "$task $arm $rep"
     done
   done | xargs -P "$PAR" -L 1 "$HERE/run.sh" >> "$RESULTS_DIR/run.log" 2>&1 || true

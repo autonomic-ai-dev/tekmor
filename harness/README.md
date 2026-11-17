@@ -83,3 +83,44 @@ Decision rule:
 Secondary, reported with no decision attached: PASSED receipts per arm, median turns, median cost, total cost, median stop-gate events, and the ratio of median cost. A median cost ratio above 2.0 is reported as a material cost increase.
 
 The pilot results (`results/clamp`, `results/slug`) are not part of this benchmark and are kept in their own folder.
+
+## Revision 2: pre-registered before the v2 run
+
+The v1 run (`results/superseded-design-v1`) was stopped after about 280 runs and is not analysed. Its tekmor arm had a `.verify/` scaffold that the control arm lacked, so its primary comparison mixed the scaffold with the gates. Its runs also recorded no transcript, so the mechanism could not be checked. Revision 2 fixes both before any v2 run.
+
+Arms, all with the same fixture, prompt, model setting, budget cap and settings:
+- `control`: the fixture only.
+- `scaffold`: the fixture plus `.verify/verify.toml` (allowlist `sh check.sh`), a feature map and a knowledge-base entry. No gate hooks.
+- `tekmor`: the scaffold plus the project-level gate hooks from `tekmor install`.
+
+The prompt in every arm already tells the agent to run `sh check.sh` and state its output, so "be told to verify" is held constant. Only the scaffold and the gates differ between arms.
+
+Estimand: the effect on these 50 fixed tasks. This study makes no claim about tasks like these, and the tasks are synthetic.
+
+Primary comparison: `tekmor` minus `control`, which is the shipped product against no product.
+Secondary comparisons, both with a decision: `tekmor` minus `scaffold` (the effect of the gates beyond the scaffold), and `scaffold` minus `control` (the effect of the scaffold alone).
+
+Effect and interval: as in v1. Per task, the accepted rate in one arm minus the other. The headline is the mean across tasks. The 95% interval comes from a cluster bootstrap over tasks and repetitions, with 5000 resamples and seed 20261117.
+
+Decision rule, applied to each comparison:
+- Interval above zero: the first arm accepts more.
+- Interval below zero: the first arm accepts less.
+- Otherwise: no detectable difference at this sample size. This is not reported as "no effect".
+
+Mechanism outcomes, reported per arm with no decision attached:
+- `check_runs`: Bash calls whose command contains `check.sh`, taken from the transcript.
+- `claimed_pass`: the final message matches `pass`, `passes` or `passed`. This is a heuristic, and it can match a negated sentence.
+- `unverified_claim`: `claimed_pass` with zero check runs. This is the failure the gate is meant to stop.
+- `stop_blocks` and `stop_handbacks`: stop-gate events from the gate log.
+- `blocks_in_accepted_runs`: runs with at least one block that were accepted in the end. This is a proxy for false blocks, not a measure of them. A block on work that was finished but had no receipt can only be classed as false with per-turn ground truth, which this study does not collect.
+- `PASSED_receipts`, `median_turns`, `median_cost`, `total_cost`.
+
+Hidden-test leakage: `leak_refs` counts tool calls whose input mentions `hidden.py`, `accept.sh` or `harness/tasks`. Any run with `leak_refs` above zero is excluded from the primary analysis and reported separately. The hidden tests live in the main repository, so an agent with unrestricted file access could in principle read them. This check is the evidence that it did not.
+
+Null result: if every decisive comparison's interval includes zero, the study reports "no detectable effect of tekmor on these 50 synthetic tasks at 10 repetitions". It does not change any product claim beyond that. The next study uses real-repository tasks, with its sample size calculated before it runs. If the mechanism counts show the gate blocking and acceptance not moving, the next step is to read the blocked turns, not to add features.
+
+Stopping: every task runs 10 repetitions per arm. The only early stop is the budget ceiling. Stopping on the interval is not allowed.
+
+Budget: 3 arms × 50 tasks × 10 repetitions = 1500 runs. Each run is capped at `BUDGET_USD` (default $1). The matrix stops before a repetition if the recorded total reaches `CEILING_USD` (default $60). The smoke runs cost about $0.003 for control and scaffold and $0.014 for tekmor on one task, so the expected total is about $15.
+
+Run: `RESULTS_DIR=results/bench-v2 REPS=10 PAR=4 CEILING_USD=60 ./run_matrix.sh`, then `python3 analyze.py results/bench-v2`.
