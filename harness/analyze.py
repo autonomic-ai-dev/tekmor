@@ -7,8 +7,11 @@ from collections import defaultdict
 
 BOOTSTRAPS = 5000
 SEED = 20261117
-ARMS = ("control", "scaffold", "tekmor")
-COMPARISONS = (("tekmor", "control"), ("tekmor", "scaffold"), ("scaffold", "control"))
+ARMS = ("control", "scaffold", "tekmor", "playbook")
+DECISIVE = (("tekmor", "control"), ("tekmor", "scaffold"), ("scaffold", "control"), ("tekmor", "playbook"))
+DESCRIPTIVE = (("playbook", "control"),)
+COMPARISONS = DECISIVE + DESCRIPTIVE
+TAIL = 0.05 / (2 * len(DECISIVE))
 
 
 def load(folder):
@@ -54,7 +57,7 @@ def bootstrap(table, a, b):
         if value is not None:
             draws.append(value)
     draws.sort()
-    return draws[int(0.025 * len(draws))], draws[int(0.975 * len(draws)) - 1]
+    return draws[int(TAIL * len(draws))], draws[int((1 - TAIL) * len(draws)) - 1]
 
 
 def verdict(lo, hi, a, b):
@@ -96,7 +99,7 @@ def main():
     table = by_task_arm(rows)
     tasks = sorted(table)
     print(f"runs: {len(all_rows)}   excluded for hidden-file references: {len(all_rows) - len(rows)}   analysed: {len(rows)}   tasks: {len(tasks)}")
-    print("effect = mean over tasks of (accepted rate in A minus accepted rate in B), 95% cluster bootstrap")
+    print(f"effect = mean over tasks of (accepted rate in A minus accepted rate in B); cluster bootstrap, {100 * (1 - 2 * TAIL):.2f}% intervals (Bonferroni over {len(DECISIVE)} decisive comparisons; playbook minus control is descriptive and unadjusted)")
     for a, b in COMPARISONS:
         effect = pooled(list(table.values()), a, b)
         if effect is None:

@@ -4,10 +4,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN="${TEKMOR_BIN:-$HERE/../target/debug/tekmor}"
 OUT="${RESULTS_DIR:-$HERE/results}"
-task="${1:?usage: run.sh <task> <control|scaffold|tekmor> <rep>}"
-arm="${2:?arm: control, scaffold or tekmor}"
+task="${1:?usage: run.sh <task> <control|scaffold|tekmor|playbook> <rep>}"
+arm="${2:?arm: control, scaffold, tekmor or playbook}"
 rep="${3:?repetition number}"
-case "$arm" in control | scaffold | tekmor) ;; *) echo "unknown arm: $arm" >&2; exit 2 ;; esac
+case "$arm" in control | scaffold | tekmor | playbook) ;; *) echo "unknown arm: $arm" >&2; exit 2 ;; esac
 src="$HERE/tasks/$task"
 [ -d "$src/fixture" ] || { echo "no task $task" >&2; exit 2; }
 
@@ -24,12 +24,16 @@ cd "$repo"
 git init -q
 git add -A && git_commit baseline
 
-if [ "$arm" != control ]; then
+if [ "$arm" = scaffold ] || [ "$arm" = tekmor ]; then
   mkdir -p .verify/features .verify/knowledge-base
   printf '[verify]\ncommands = ["sh check.sh"]\n' > .verify/verify.toml
   printf -- '---\nfeature: app\nknowledge_base: "[[../knowledge-base/app]]"\n---\n\n# app\n\n## Code\n\n- `lib`\n\n## Verification Suites\n\n- `sh check.sh`\n' > .verify/features/app.md
   printf '# app\n\nThe app library and its check.\n' > .verify/knowledge-base/app.md
   git add -A && git_commit "proof setup"
+fi
+if [ "$arm" = playbook ]; then
+  cp "$HERE/playbook.md" CLAUDE.md
+  git add -A && git_commit "playbook"
 fi
 if [ "$arm" = tekmor ]; then
   TEKMOR_HOME="$home" "$BIN" install > /dev/null

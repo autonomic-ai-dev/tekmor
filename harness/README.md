@@ -124,3 +124,24 @@ Stopping: every task runs 10 repetitions per arm. The only early stop is the bud
 Budget: 3 arms × 50 tasks × 10 repetitions = 1500 runs. Each run is capped at `BUDGET_USD` (default $1). The matrix stops before a repetition if the recorded total reaches `CEILING_USD` (default $60). The smoke runs cost about $0.003 for control and scaffold and $0.014 for tekmor on one task, so the expected total is about $15.
 
 Run: `RESULTS_DIR=results/bench-v2 REPS=10 PAR=4 CEILING_USD=60 ./run_matrix.sh`, then `python3 analyze.py results/bench-v2`.
+
+## Revision 3: playbook arm, pre-registered before the playbook runs
+
+Question: does the binary change outcomes beyond the same checks written as instructions? A team could get the same instruction with no binary, so this is the comparison that decides whether tekmor is worth using over a playbook.
+
+Arm `playbook`: the fixture plus `CLAUDE.md` containing `playbook.md` (the instructions a team would write without the binary). No `.verify/` files, no hooks, no receipts. Claude Code reads `CLAUDE.md`, not `AGENTS.md`, so the instructions go there. Same tasks, prompt, budget, settings and repetitions.
+
+Text of the playbook, as it is in `playbook.md`:
+
+> Before you tell the user a change is finished: run `sh check.sh` from the repository root; read its output and say a check passed only if its output says PASS; if it fails, fix the code and run it again; in your final message, copy the exact final output of `sh check.sh`. Do not edit check.sh or check.py.
+
+Decisive comparisons, four in total: tekmor minus control (primary, from revision 2), tekmor minus scaffold, scaffold minus control, and tekmor minus playbook. The decision for tekmor minus playbook is the one that answers whether the binary is worth using:
+- Interval above zero: tekmor accepts more than the playbook.
+- Interval below zero: the playbook accepts more.
+- Otherwise: no detectable difference. The binary is not shown to add acceptance over a playbook. The product's case then rests on the receipt record and the enforcement, and no acceptance gain is claimed.
+
+Multiple comparisons: the four decisive comparisons share one family, so each interval uses the Bonferroni-adjusted level, 98.75% (tail 0.0125). Playbook minus control is reported descriptively and unadjusted. This level change is recorded here before any v2 analysis was run. The revision-2 rule stated 95%, and the v2 results have not been analysed.
+
+Mechanism outcomes for the playbook arm are reported in the same way as the others. The key comparison is the unverified-claim rate: a pass claim with no check run, playbook against tekmor. That is where a gate should differ from an instruction.
+
+Run order: revision-2 matrix first (complete, 1500 runs). Then the playbook arm, 500 runs, into the same results folder with `ARMS=playbook`. Then `python3 analyze.py` on the combined results.
