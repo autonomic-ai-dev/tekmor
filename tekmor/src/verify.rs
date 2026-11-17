@@ -792,10 +792,6 @@ fn hash_tree(dir: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-pub fn ran_a_check(source: Option<&str>) -> bool {
-    matches!(source.unwrap_or("cli"), "cli" | "orchestrator")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
