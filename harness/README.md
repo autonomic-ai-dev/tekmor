@@ -145,3 +145,11 @@ Multiple comparisons: the four decisive comparisons share one family, so each in
 Mechanism outcomes for the playbook arm are reported in the same way as the others. The key comparison is the unverified-claim rate: a pass claim with no check run, playbook against tekmor. That is where a gate should differ from an instruction.
 
 Run order: revision-2 matrix first (complete, 1500 runs). Then the playbook arm, 500 runs, into the same results folder with `ARMS=playbook`. Then `python3 analyze.py` on the combined results.
+
+## Revision 3.1: quota failures and a task defect, pre-registered before the rerun
+
+Quota failures. The first playbook matrix hit the account's usage limit (HTTP 429, "5-hour limit"). 333 of its 500 runs failed on that error, in reps 4 to 10, before the agent took any action. These are infrastructure failures, not outcomes of the arm, and revision 3 counted them as attempts. This revision replaces that rule for these runs only. The 333 failed cells are rerun once with the same arm, prompt, budget and settings, after a test run confirmed quota was available. The original transcripts go to `quota-errors/` and their rows to `quota-errors.jsonl`. Neither is analysed. A cell that errors again on rerun is reported as an error and counted as a failed attempt. The primary analysis uses one row per task, arm and repetition: the rerun row where a rerun happened, and the original row otherwise.
+
+Task b17_get_path. Its hidden test requires the default when an intermediate value is not a mapping (case `({'a': 0}, 'a.b', 9)`). The issue text does not describe that case. All 30 runs of this task scored 0 across the four arms. It stays in the primary analysis. A sensitivity analysis without it is reported next to the primary one. No arm differs on it, so excluding it does not change any comparison. The task is not edited during the study.
+
+Observed before the rerun, reported as observed and not as a finding: in the three arms that completed, the visible check was run in every run (control and scaffold median 2 check runs, tekmor median 4), so the unverified-claim count was 0 in every arm. The failure the gate targets did not occur in these tasks, because the prompt already tells the agent to run the check. Acceptance was 98% in control and scaffold.
