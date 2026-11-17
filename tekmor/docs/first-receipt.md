@@ -19,7 +19,7 @@ brew install tekmor
 tekmor install --global
 ```
 
-This registers the `bash-gate` and `stop-gate` hooks in `~/.claude/settings.json`. Without `--global` it writes `.claude/settings.json` at the root of the current repository instead. Claude Code is the only host tekmor configures. `install` rejects other host flags, so a request for another host fails rather than installing Claude Code hooks by mistake.
+This registers the `bash-gate` and `stop-gate` hooks in `~/.claude/settings.json`. Without `--global` it writes `.claude/settings.json` at the root of the current repository instead. Claude Code is the only host tekmor configures. `install` rejects other host flags, so a request for another host fails rather than installing Claude Code hooks by mistake. On other hosts tekmor works as a receipt writer without enforcement. See [hosts.md](hosts.md).
 
 ## 3. Initialise verification in your project
 
