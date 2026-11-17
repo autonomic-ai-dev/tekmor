@@ -194,10 +194,10 @@ mod tests {
 
     #[test]
     fn resolves_programs_on_the_given_path_only() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("temp dir");
         let tool = dir.path().join("mytool");
-        std::fs::write(&tool, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&tool, "#!/bin/sh\n").expect("write tool");
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).expect("chmod tool");
         let path = dir.path().to_string_lossy().to_string();
         assert!(resolve_on_path("mytool", &path));
         assert!(!resolve_on_path("absent-tool", &path));
