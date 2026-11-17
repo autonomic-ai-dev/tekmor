@@ -703,17 +703,17 @@ fn hash_path(path: &Path) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
 
+const GENERATED_SEGMENTS: [&str; 5] = ["__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "target"];
+
 pub fn is_code_path(path: &str) -> bool {
     let segments: Vec<&str> = path.split('/').collect();
-    if segments.contains(&".verify") {
+    if segments.iter().any(|segment| matches!(*segment, ".verify" | ".claude" | ".git")) {
         return false;
     }
-    let file = segments.last().copied().unwrap_or_default();
-    segments
-        .iter()
-        .any(|segment| matches!(*segment, "src" | "crates" | "tests" | "hooks"))
-        || file.starts_with("Cargo.")
-        || file == "build.rs"
+    if segments.iter().any(|segment| GENERATED_SEGMENTS.contains(segment)) || path.ends_with(".pyc") {
+        return false;
+    }
+    !(path.ends_with(".md") || path.ends_with(".rst"))
 }
 
 fn counts_toward_tree(path: &str) -> bool {
