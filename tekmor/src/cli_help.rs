@@ -17,6 +17,7 @@ pub fn print_root() {
 Usage:  tekmor <command> [args]\n\n\
 Commands:\n\
   verify -- <cmd>          Run an allowlisted check and record its outcome\n\
+  doctor                   Check hooks, git, the allowlist and the store\n\
   verify receipt           Show whether the current commit and code passed\n\
   verify summary           Per check: failed runs out of all runs\n\
   verify init              Create .verify/ with an allowlist\n\

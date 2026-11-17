@@ -47,6 +47,12 @@ async fn main() -> Result<()> {
             let quiet = args.iter().any(|a| a == "--quiet");
             host_hooks::install_claude_code_hooks(user, quiet)?;
         }
+        "doctor" => {
+            let root = std::env::current_dir()?;
+            if !tekmor::doctor::run(&root)? {
+                std::process::exit(1);
+            }
+        }
         "version" => {
             println!("tekmor {}", env!("CARGO_PKG_VERSION"));
         }
