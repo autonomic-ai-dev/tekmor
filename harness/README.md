@@ -153,3 +153,9 @@ Quota failures. The first playbook matrix hit the account's usage limit (HTTP 42
 Task b17_get_path. Its hidden test requires the default when an intermediate value is not a mapping (case `({'a': 0}, 'a.b', 9)`). The issue text does not describe that case. All 30 runs of this task scored 0 across the four arms. It stays in the primary analysis. A sensitivity analysis without it is reported next to the primary one. No arm differs on it, so excluding it does not change any comparison. The task is not edited during the study.
 
 Observed before the rerun, reported as observed and not as a finding: in the three arms that completed, the visible check was run in every run (control and scaffold median 2 check runs, tekmor median 4), so the unverified-claim count was 0 in every arm. The failure the gate targets did not occur in these tasks, because the prompt already tells the agent to run the check. Acceptance was 98% in control and scaffold.
+
+## Corrections (2026-11-17)
+
+- The v2 run has 2000 runs: four arms (control, scaffold, tekmor, playbook) of 500 each. The playbook arm's 333 quota-failed runs were rerun under revision 3.1. The earlier 1000 and 1500 figures are out of date.
+- The v2 tasks are at ceiling. `validate_tasks.py --calibration <metrics.jsonl>` reports every task whose control acceptance is outside 0.2 to 0.8. Against v2, all 50 are outside that band, so v2 cannot measure the product.
+- Generated checks and hidden tests run with `python3 -B -I`, so bytecode cannot hide an edit or enter the tree hash. Tasks generated before this change used `python3 -I`.

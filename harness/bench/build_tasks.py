@@ -90,8 +90,8 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv[1]))
 '''
 
-CHECK_SH = "python3 -I check.py\n"
-ACCEPT_SH = 'python3 -I "$(dirname "$0")/hidden.py" "$1"\n'
+CHECK_SH = "python3 -B -I check.py\n"
+ACCEPT_SH = 'python3 -B -I "$(dirname "$0")/hidden.py" "$1"\n'
 
 
 def expected_for(reference_fn, args):

@@ -45,6 +45,7 @@ if [ "${DRY_RUN:-0}" = 1 ]; then
   echo '{"type":"result","subtype":"success","is_error":false,"num_turns":0,"duration_ms":0,"total_cost_usd":0,"result":"dry run"}' > "$out"
 else
   TEKMOR_HOME="$home" claude -p "$(cat "$src/prompt.md")" \
+    --model "${MODEL:-claude-haiku-5-5}" \
     --output-format stream-json --verbose \
     --max-budget-usd "${BUDGET_USD:-1}" \
     --setting-sources project,local \
@@ -79,7 +80,8 @@ jq -c -n \
     unverified_claim: ($claimed_pass and $check_runs == 0),
     leak_refs: $leak_refs,
     turns: ($agent.num_turns // 0), duration_ms: ($agent.duration_ms // 0),
-    cost_usd: ($agent.total_cost_usd // 0), agent_error: ($agent.is_error != false)}' \
+    cost_usd: ($agent.total_cost_usd // 0), agent_error: ($agent.is_error != false),
+    model: (($agent.modelUsage // {}) | keys | first // "")}' \
   >> "$OUT/metrics.jsonl"
 
 echo "$task $arm rep=$rep accepted=$([ "$accepted" -eq 0 ] && echo yes || echo no) receipt=[$receipt] check_runs=$(tail -1 "$OUT/metrics.jsonl" | jq .check_runs)"
