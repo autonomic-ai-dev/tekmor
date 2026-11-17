@@ -3,6 +3,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN="${TEKMOR_BIN:-$HERE/../target/debug/tekmor}"
+OUT="${RESULTS_DIR:-$HERE/results}"
 task="${1:?usage: run.sh <task> <control|tekmor> <rep>}"
 arm="${2:?arm: control or tekmor}"
 rep="${3:?repetition number}"
@@ -10,7 +11,7 @@ case "$arm" in control | tekmor) ;; *) echo "unknown arm: $arm" >&2; exit 2 ;; e
 src="$HERE/tasks/$task"
 [ -d "$src/fixture" ] || { echo "no task $task" >&2; exit 2; }
 
-results="$HERE/results/$task/$arm"
+results="$OUT/$task/$arm"
 mkdir -p "$results"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -60,6 +61,6 @@ jq -c -n \
     receipt: $receipt, stop_events: $stop_events,
     turns: ($agent[0].num_turns // 0), duration_ms: ($agent[0].duration_ms // 0),
     cost_usd: ($agent[0].total_cost_usd // 0), agent_error: ($agent[0].is_error != false)}' \
-  >> "$HERE/results/metrics.jsonl"
+  >> "$OUT/metrics.jsonl"
 
 echo "$task $arm rep=$rep accepted=$([ "$accepted" -eq 0 ] && echo yes || echo no) receipt=[$receipt]"
