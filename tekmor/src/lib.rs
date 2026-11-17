@@ -1,4 +1,5 @@
 pub mod cli_help;
+pub mod doctor;
 pub mod command_policy;
 pub mod command_rules;
 pub mod commit_gate;
