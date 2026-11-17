@@ -13,6 +13,20 @@ A proof eval for coding agents. tekmor runs the checks a project allowlists, rec
 - **ratchet, drift and check-checks**: `tekmor verify ratchet` keeps lint counts from rising, `tekmor verify drift` finds stale feature maps, and `tekmor verify check-checks` checks that each check fails on a broken copy.
 - **repeats**: `tekmor verify --repeat N -- <cmd>` records N runs. A command whose runs disagree is flaky and does not count as proof.
 
+## What a receipt proves, and what it does not
+
+A receipt proves that your allowlisted command exited 0 on this exact tree: the commit, plus a hash of the uncommitted files.
+
+It does not prove:
+
+- That your test suite covers the change. If the existing tests already pass on broken code, the gate opens. `tekmor verify check-checks` runs your checks against known-broken copies in `.verify/broken/`. It covers only the breakages you wrote down.
+- That the agent's Write and Edit tools were gated. The gates see Bash commands only.
+- Anything about files ending in `.md` or under `.claude/`. They are excluded from the tree hash.
+- Who ran the command. The hash is a SHA-256 over a defined file set, so it shows the content matched, not who ran it.
+- Enforcement outside Claude Code. Elsewhere tekmor writes receipts, and nothing stops an agent from ignoring them.
+
+Try it in about 20 seconds, without an API key: `sh examples/demo.sh`.
+
 ## Install
 
 Homebrew (macOS, Apple Silicon):
