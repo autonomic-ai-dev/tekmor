@@ -5,3 +5,5 @@ The proof CLI: verify runs and outcomes, receipt, check summary, stop gate, bash
 ## Proof hardening (v1 work)
 
 - Review, ratchet, drift, check-checks, flaky handling, claim reconciliation and the black-box check are described in the `cli-proof` feature map. Each new module has tests in its own file.
+
+The stop gate treats any changed file as code unless it is a doc, a proof or hook-config file, or generated output. It is not limited to Rust layouts, so a Python or JavaScript change needs a passing run too.

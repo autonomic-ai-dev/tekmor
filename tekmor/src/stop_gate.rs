@@ -496,6 +496,25 @@ mod tests {
     }
 
     #[test]
+    fn source_in_any_language_needs_a_verification_run() {
+        assert!(verify::is_code_path("yt_dlp/utils/_utils.py"));
+        assert!(verify::is_code_path("lib/clamp.js"));
+        assert!(verify::is_code_path("main.go"));
+        assert!(!verify::is_code_path("docs/guide.md"));
+        assert!(!verify::is_code_path(".verify/verify.toml"));
+        assert!(!verify::is_code_path(".claude/settings.json"));
+    }
+
+    #[test]
+    fn generated_caches_are_not_code() {
+        assert!(!verify::is_code_path("pkg/__pycache__/mod.cpython-315.pyc"));
+        assert!(!verify::is_code_path("pkg/mod.pyc"));
+        assert!(!verify::is_code_path(".pytest_cache/v/cache/lastfailed"));
+        assert!(!verify::is_code_path("web/node_modules/x/index.js"));
+        assert!(!verify::is_code_path("target/debug/build/x.rs"));
+    }
+
+    #[test]
     fn counts_blocks_only_for_the_same_session_and_edit() {
         let prior = BlockState {
             session_id: "s1".into(),
@@ -562,7 +581,7 @@ mod tests {
     fn doc_edited_repo(dir: &Path, verify_toml: &str) {
         edited_repo(dir, Some(verify_toml));
         fs::remove_file(dir.join("src/changed.rs")).unwrap();
-        fs::write(dir.join("changed.txt"), b"edit").unwrap();
+        fs::write(dir.join("changed.md"), b"edit").unwrap();
     }
 
     fn gate_store(dir: &Path) -> BrainStore {
