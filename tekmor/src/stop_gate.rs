@@ -361,7 +361,7 @@ fn evaluate_stop(
                 hash.as_deref(),
             )));
         }
-        (None, None) => BLOCK_REASON.to_string(),
+        (None, None) => missing_verification_message(root),
     };
     if mode == GateMode::Watch {
         return Ok(StopOutcome::HandBack(reason));
@@ -385,6 +385,21 @@ fn evaluate_stop(
         }
         Decision::Allow => Ok(StopOutcome::HandBack(reason)),
     }
+}
+
+fn missing_verification_message(root: &Path) -> String {
+    let commands = verify::load_command_allowlist(root);
+    if commands.is_empty() {
+        return BLOCK_REASON.to_string();
+    }
+    let runnable = commands
+        .iter()
+        .map(|cmd| format!("`tekmor verify -- {cmd}`"))
+        .collect::<Vec<_>>()
+        .join(" or ");
+    format!(
+        "Verification is missing. Files changed in this repo have no passing run recorded after the last edit. Run exactly one of: {runnable}. Let it pass, then finish."
+    )
 }
 
 fn failure_reason(run: &verify::StepRun) -> String {
@@ -484,6 +499,21 @@ mod tests {
     #[test]
     fn allows_stop_once_block_limit_is_reached_without_verification() {
         assert_eq!(decide(false, STOP_BLOCK_LIMIT), Decision::Allow);
+    }
+
+    #[test]
+    fn missing_verification_names_the_allowlisted_command() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".verify")).unwrap();
+        fs::write(
+            dir.path().join(".verify/verify.toml"),
+            "[verify]\ncommands = [\"cargo test\"]\n",
+        )
+        .unwrap();
+        let message = missing_verification_message(dir.path());
+        assert!(message.contains("`tekmor verify -- cargo test`"), "{message}");
+        let bare = TempDir::new().unwrap();
+        assert_eq!(missing_verification_message(bare.path()), BLOCK_REASON);
     }
 
     #[test]
