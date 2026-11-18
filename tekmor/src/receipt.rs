@@ -202,7 +202,7 @@ pub fn receipt_for_project(store: &BrainStore, root: &Path) -> Result<Receipt> {
         &rows,
         head.as_deref(),
         code.as_deref(),
-        |cmd| verify::command_is_allowlisted(cmd, Some(root)),
+        |cmd| verify::command_text_is_allowlisted(cmd, Some(root)),
     );
     receipt.protected_changes = protected_changes(root);
     if let Some(evidence) = receipt.evidence.as_mut() {

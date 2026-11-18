@@ -14,7 +14,7 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
 
 - `verify-run`: Runs an allowlisted command and records its outcome.
   - Intent: Only a real check run on the current code counts as proof.
-  - Behaviour: `tekmor verify -- <cmd>` runs a command from `.verify/verify.toml` and stores exit code, command, source, code hash and head SHA (`verify.rs`).
+  - Behaviour: `tekmor verify -- <cmd>` runs a command from `.verify/verify.toml` and stores exit code, command, source, code hash and head SHA (`verify.rs`). The command must start with an allowlist entry token by token in its argv, so `echo cargo test` is refused.
   - Outcome: The recorded run is what the receipt and the stop gate read.
 - `receipt`: Shows whether the current commit and code passed.
   - Behaviour: `tekmor verify receipt [--markdown|--json]` builds a receipt from recorded runs for the current head and code hash (`receipt.rs`). Exit code is 0 only when the verdict is Passed.
