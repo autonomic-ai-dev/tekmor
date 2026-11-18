@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::verify;
 
 const CODE_HEADING: &str = "## Code";
 
@@ -94,10 +95,6 @@ fn is_command(span: &str) -> bool {
     span.contains(' ') || span.starts_with("./") || span.starts_with(".verify/") || !span.contains(['.', '/', '_'])
 }
 
-fn is_code(path: &str) -> bool {
-    !path.starts_with(".verify/") && !path.ends_with(".md")
-}
-
 fn owns(entry: &str, path: &str) -> bool {
     path == entry
         || path
@@ -147,7 +144,7 @@ pub fn gap(changed: &[String], features: &[FeatureMap], knowledge: &[String]) ->
     let code: Vec<&str> = changed
         .iter()
         .map(String::as_str)
-        .filter(|path| is_code(path))
+        .filter(|path| verify::is_code_path(path))
         .collect();
     if code.is_empty() {
         return None;
@@ -386,5 +383,14 @@ mod tests {
     fn expected_and_request_lines_are_not_commands() {
         let text = "## Verification Suites\n- Request: `CMD anode cluster ./testdata/hyper_mesh_12`\n  - Expected: exit code `0`\n- Unit: `cargo test -p thesmos`\n";
         assert_eq!(parse_verification_commands(text), ["cargo test -p thesmos"]);
+    }
+
+    #[test]
+    fn gap_asks_only_for_the_code_the_stop_gate_counts() {
+        let names = |paths: &[&str]| paths.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+        assert!(gap(&names(&["lib/nums.py"]), &[], &[]).is_some());
+        assert!(gap(&names(&["__pycache__/m.cpython-315.pyc"]), &[], &[]).is_none());
+        assert!(gap(&names(&[".claude/settings.json"]), &[], &[]).is_none());
+        assert!(gap(&names(&["docs/guide.rst"]), &[], &[]).is_none());
     }
 }
