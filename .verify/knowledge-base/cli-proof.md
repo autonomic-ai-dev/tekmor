@@ -6,6 +6,8 @@ The proof CLI: verify runs and outcomes, receipt, check summary, stop gate, bash
 
 - Review, ratchet, drift, check-checks, flaky handling, claim reconciliation and the black-box check are described in the `cli-proof` feature map. Each new module has tests in its own file.
 
+The feature-map gap check and the stop gate use one definition of changed code (`verify::is_code_path`), so both ask for the same files.
+
 A run records its command as the argv rendered with shell quoting, so `sh check.sh ';' touch /tmp/x` is stored with the `;` quoted. Plain words are stored unchanged, so existing allowlist and requirement matches still hold.
 
 The code tree hash ignores generated output (`__pycache__`, `.pyc`, `target`, `node_modules` and the other generated segments), so a bytecode write does not turn a PASSED receipt into NOT VERIFIED.
