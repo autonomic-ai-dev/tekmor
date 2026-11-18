@@ -26,7 +26,7 @@ fn feature_drift(root: &Path, feature: &FeatureMap) -> Vec<Drift> {
         }
     }
     for cmd in &feature.commands {
-        if !verify::command_is_allowlisted(cmd, Some(root)) {
+        if !verify::command_text_is_allowlisted(cmd, Some(root)) {
             problems.push(format!("check `{cmd}` is not in the allowlist"));
         }
     }

@@ -182,7 +182,7 @@ pub fn run_default_step(
         return Ok(None);
     };
     let joined = step.command.join(" ");
-    if !command_is_allowlisted(&joined, Some(project_root)) {
+    if !command_is_allowlisted(step.command.as_slice(), Some(project_root)) {
         bail!(
             "default verify step `{joined}` is not in the verify allowlist; add it to commands in .verify/verify.toml"
         );
@@ -223,38 +223,46 @@ pub fn load_command_allowlist(project_root: &Path) -> Vec<String> {
     Vec::new()
 }
 
-/// True if `cmd` matches an allowlist entry (substring or as prefix of the joined command).
-/// Empty allowlist → fallback to common runners (cargo test, pytest, .verify/, mvnw verify).
-pub fn command_is_allowlisted(cmd: &str, project_root: Option<&Path>) -> bool {
-    let cmd = cmd.trim();
-    if cmd.is_empty() {
+pub fn command_is_allowlisted<S: AsRef<str>>(argv: &[S], project_root: Option<&Path>) -> bool {
+    if argv.is_empty() {
         return false;
     }
     let list = project_root.map(load_command_allowlist).unwrap_or_default();
     if list.is_empty() {
-        return default_allowlist_match(cmd);
+        return default_allowlist_match(argv);
     }
-    list.iter().any(|entry| {
-        let e = entry.trim();
-        !e.is_empty() && (cmd == e || cmd.starts_with(e) || cmd.contains(e))
-    })
+    list.iter().any(|entry| argv_has_prefix(argv, entry))
 }
 
-fn default_allowlist_match(cmd: &str) -> bool {
-    let lower = cmd.to_ascii_lowercase();
-    lower.contains("cargo test")
-        || lower.contains("cargo clippy")
-        || lower.contains("cargo check")
-        || lower.contains("pytest")
-        || lower.contains("npm test")
-        || lower.contains("bun test")
-        || lower.contains("go test")
-        || lower.contains("make test")
-        || lower.contains("./mvnw")
-        || lower.contains("mvnw ")
-        || lower.contains(".verify/")
-        || lower.contains("tekmor proofs")
-        || lower.contains("tekmor doctor")
+pub fn command_text_is_allowlisted(cmd: &str, project_root: Option<&Path>) -> bool {
+    let argv: Vec<&str> = cmd.split_whitespace().collect();
+    command_is_allowlisted(&argv, project_root)
+}
+
+fn argv_has_prefix<S: AsRef<str>>(argv: &[S], entry: &str) -> bool {
+    let tokens: Vec<&str> = entry.split_whitespace().collect();
+    !tokens.is_empty()
+        && argv.len() >= tokens.len()
+        && tokens.iter().zip(argv).all(|(token, arg)| *token == arg.as_ref())
+}
+
+const DEFAULT_RUNNERS: &[&str] = &[
+    "cargo test",
+    "cargo clippy",
+    "cargo check",
+    "pytest",
+    "npm test",
+    "bun test",
+    "go test",
+    "make test",
+    "mvnw",
+    "./mvnw",
+];
+
+fn default_allowlist_match<S: AsRef<str>>(argv: &[S]) -> bool {
+    argv.first()
+        .is_some_and(|program| program.as_ref().starts_with(".verify/"))
+        || DEFAULT_RUNNERS.iter().any(|entry| argv_has_prefix(argv, entry))
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -628,7 +636,7 @@ pub fn run_verify(store: &BrainStore, cmd: &[String], run: VerifyRun<'_>) -> Res
     let project_root = std::env::current_dir()
         .ok()
         .map(|cwd| crate::config::find_repo_root(&cwd).unwrap_or(cwd));
-    if !command_is_allowlisted(&joined, project_root.as_deref()) {
+    if !command_is_allowlisted(cmd, project_root.as_deref()) {
         bail!("`{joined}` is not in the verify allowlist; add it to .verify/verify.toml");
     }
     let (exit_code, output) = run_process(cmd, None, VERIFY_RUN_TIMEOUT, true)?;
@@ -868,16 +876,48 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
 "#,
         )
         .unwrap();
-        assert!(command_is_allowlisted(
+        assert!(command_text_is_allowlisted(
             "./mvnw -q verify -DskipITs",
             Some(dir.path())
         ));
-        assert!(command_is_allowlisted(
+        assert!(command_text_is_allowlisted(
             "cargo test -p tekmor",
             Some(dir.path())
         ));
-        assert!(!command_is_allowlisted("true", Some(dir.path())));
-        assert!(!command_is_allowlisted("echo hi", Some(dir.path())));
+        assert!(!command_text_is_allowlisted("true", Some(dir.path())));
+        assert!(!command_text_is_allowlisted("echo hi", Some(dir.path())));
+    }
+
+    #[test]
+    fn allowlist_matches_argv_not_a_string_that_mentions_an_entry() -> Result<()> {
+        let dir = tempdir()?;
+        fs::create_dir_all(dir.path().join(".verify"))?;
+        fs::write(
+            dir.path().join(".verify/verify.toml"),
+            "[verify]\ncommands = [\"cargo test\", \"sh check.sh\"]\n",
+        )?;
+        let root = Some(dir.path());
+        assert!(!command_is_allowlisted(&["echo", "cargo", "test"], root));
+        assert!(!command_is_allowlisted(&["echo", "sh", "check.sh"], root));
+        assert!(!command_is_allowlisted(&["cargo", "testing"], root));
+        assert!(!command_is_allowlisted(&["cargo"], root));
+        assert!(command_is_allowlisted(&["cargo", "test", "-p", "x"], root));
+        assert!(command_is_allowlisted(&["sh", "check.sh"], root));
+        Ok(())
+    }
+
+    #[test]
+    fn default_runners_must_be_the_program_not_an_argument() -> Result<()> {
+        let dir = tempdir()?;
+        let root = Some(dir.path());
+        assert!(command_is_allowlisted(&["cargo", "test"], root));
+        assert!(command_is_allowlisted(&["pytest", "-q"], root));
+        assert!(command_is_allowlisted(&[".verify/run.sh"], root));
+        assert!(!command_is_allowlisted(&["echo", "pytest"], root));
+        assert!(!command_is_allowlisted(&["echo", "cargo", "test"], root));
+        assert!(!command_is_allowlisted(&["echo", ".verify/run.sh"], root));
+        assert!(!command_is_allowlisted::<&str>(&[], root));
+        Ok(())
     }
 
     #[test]
@@ -1079,7 +1119,10 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         assert!(toml_str.contains("\".verify/run.sh\""));
         assert!(!toml_str.contains("\".verify/\""));
 
-        assert!(command_is_allowlisted("cargo test", Some(dir.path())));
-        assert!(command_is_allowlisted(".verify/run.sh", Some(dir.path())));
+        assert!(command_text_is_allowlisted("cargo test", Some(dir.path())));
+        assert!(command_text_is_allowlisted(
+            ".verify/run.sh",
+            Some(dir.path())
+        ));
     }
 }
