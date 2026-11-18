@@ -828,6 +828,18 @@ mod tests {
     }
 
     #[test]
+    fn code_tree_hash_ignores_generated_output() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        edited_repo(dir.path(), None);
+        let before = verify::code_tree_hash(dir.path()).ok_or_else(|| anyhow::anyhow!("no hash"))?;
+        fs::create_dir_all(dir.path().join("src/__pycache__"))?;
+        fs::write(dir.path().join("src/__pycache__/m.cpython-315.pyc"), b"bytecode")?;
+        fs::write(dir.path().join("cached.pyc"), b"bytecode")?;
+        assert_eq!(verify::code_tree_hash(dir.path()).as_deref(), Some(before.as_str()));
+        Ok(())
+    }
+
+    #[test]
     fn code_tree_hash_moves_on_proof_input_edits() {
         let dir = TempDir::new().unwrap();
         edited_repo(dir.path(), Some("[verify]\ncommands = [\"true\"]\n"));
