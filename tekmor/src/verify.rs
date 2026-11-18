@@ -173,6 +173,25 @@ pub struct StepRun {
     pub output: String,
 }
 
+pub fn render_argv(argv: &[String]) -> String {
+    argv.iter()
+        .map(|arg| quote_arg(arg))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn quote_arg(arg: &str) -> String {
+    let plain = !arg.is_empty()
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./=:,+@%".contains(c));
+    if plain {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', r"'\''"))
+    }
+}
+
 pub fn run_default_step(
     store: &BrainStore,
     project_root: &Path,
@@ -181,7 +200,7 @@ pub fn run_default_step(
     let Some(step) = load_default_step(project_root)? else {
         return Ok(None);
     };
-    let joined = step.command.join(" ");
+    let joined = render_argv(&step.command);
     if !command_is_allowlisted(step.command.as_slice(), Some(project_root)) {
         bail!(
             "default verify step `{joined}` is not in the verify allowlist; add it to commands in .verify/verify.toml"
@@ -632,7 +651,7 @@ pub fn run_verify(store: &BrainStore, cmd: &[String], run: VerifyRun<'_>) -> Res
     if cmd.is_empty() {
         bail!("usage: tekmor verify [--source cli|orchestrator] [--config PATH] [--scenarios DIR] [--route-log-id ID] [--cause TAG] -- <cmd> [args...]");
     }
-    let joined = cmd.join(" ");
+    let joined = render_argv(cmd);
     let project_root = std::env::current_dir()
         .ok()
         .map(|cwd| crate::config::find_repo_root(&cwd).unwrap_or(cwd));
@@ -645,7 +664,7 @@ pub fn run_verify(store: &BrainStore, cmd: &[String], run: VerifyRun<'_>) -> Res
     let report = record_from_result(
         store,
         exit_code,
-        &cmd.join(" "),
+        &joined,
         VerifyRecord {
             route_log_id,
             cause_tag,
@@ -922,6 +941,23 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         assert!(!command_is_allowlisted(&["echo", ".verify/run.sh"], root));
         assert!(!command_is_allowlisted::<&str>(&[], root));
         Ok(())
+    }
+
+    #[test]
+    fn render_argv_keeps_plain_words_and_quotes_the_rest() {
+        let argv = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            render_argv(&argv(&["cargo", "test", "-p", "tekmor"])),
+            "cargo test -p tekmor"
+        );
+        assert_eq!(
+            render_argv(&argv(&["sh", "check.sh", ";", "touch", "/tmp/x"])),
+            "sh check.sh ';' touch /tmp/x"
+        );
+        assert_eq!(
+            render_argv(&argv(&["echo", "", "it's"])),
+            "echo '' 'it'\\''s'"
+        );
     }
 
     #[test]
