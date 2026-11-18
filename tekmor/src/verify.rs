@@ -713,12 +713,16 @@ fn hash_path(path: &Path) -> Result<String> {
 
 const GENERATED_SEGMENTS: [&str; 5] = ["__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "target"];
 
+fn is_generated(path: &str) -> bool {
+    path.split('/').any(|segment| GENERATED_SEGMENTS.contains(&segment)) || path.ends_with(".pyc")
+}
+
 pub fn is_code_path(path: &str) -> bool {
     let segments: Vec<&str> = path.split('/').collect();
     if segments.iter().any(|segment| matches!(*segment, ".verify" | ".claude" | ".git")) {
         return false;
     }
-    if segments.iter().any(|segment| GENERATED_SEGMENTS.contains(segment)) || path.ends_with(".pyc") {
+    if is_generated(path) {
         return false;
     }
     !(path.ends_with(".md") || path.ends_with(".rst"))
@@ -730,7 +734,7 @@ fn counts_toward_tree(path: &str) -> bool {
         || path.starts_with(".verify/features/")
         || path.starts_with(".verify/knowledge-base/")
         || path.starts_with(".claude/");
-    !doc && !ignored
+    !doc && !ignored && !is_generated(path)
 }
 
 pub fn is_proof_input(path: &str) -> bool {

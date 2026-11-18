@@ -6,6 +6,8 @@ The proof CLI: verify runs and outcomes, receipt, check summary, stop gate, bash
 
 - Review, ratchet, drift, check-checks, flaky handling, claim reconciliation and the black-box check are described in the `cli-proof` feature map. Each new module has tests in its own file.
 
+The code tree hash ignores generated output (`__pycache__`, `.pyc`, `target`, `node_modules` and the other generated segments), so a bytecode write does not turn a PASSED receipt into NOT VERIFIED.
+
 The allowlist matches the argv of a run token by token from the start, never a joined string. A command that only mentions an entry, such as `echo cargo test`, does not match and produces no receipt.
 
 The stop gate treats any changed file as code unless it is a doc, a proof or hook-config file, or generated output. It is not limited to Rust layouts, so a Python or JavaScript change needs a passing run too.
