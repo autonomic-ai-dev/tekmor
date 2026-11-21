@@ -65,6 +65,9 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
 - `blackbox-check`: The built binary works end to end.
   - Behaviour: `.verify/checks/blackbox.sh` runs the binary through a temporary repo and home.
   - Outcome: Runs in `.verify/run.sh`.
+- `doctor`: Reports the setup the gates actually see.
+  - Behaviour: `tekmor doctor` (`doctor.rs`) runs from the repo root found from the current directory. It checks the installed hooks (`env` and `KEY=VALUE` wrappers are skipped, symlinks are compared by target), git, that `verify.toml` parses, each allowlisted program and an interpreter's script (both resolved against the repo root), the store path, and feature-map drift.
+  - Outcome: Any FAIL line makes it exit 1.
 
 ## Code
 
@@ -91,6 +94,7 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
 - `tekmor/src/cli_help.rs`
 - `tekmor/src/ratchet.rs`
 - `tekmor/src/drift.rs`
+- `tekmor/src/doctor.rs`
 - `tekmor/src/check_checks.rs`
 - `tekmor/src/review.rs`
 - `tekmor/src/claims.rs`
