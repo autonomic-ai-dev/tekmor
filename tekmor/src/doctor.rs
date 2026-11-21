@@ -86,10 +86,6 @@ fn is_executable(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-pub fn allowlist_program(command: &str) -> Option<&str> {
-    command.split_whitespace().find(|token| !token.contains('='))
-}
-
 fn interpreter_script<'a>(program: &str, args: &[&'a str]) -> Option<&'a str> {
     let name = Path::new(program).file_name()?.to_str()?;
     if !INTERPRETERS.contains(&name) {
@@ -331,13 +327,6 @@ mod tests {
     }
 
     #[test]
-    fn skips_environment_assignments_to_find_the_program() {
-        assert_eq!(allowlist_program("SWE=1 PYTHONPATH=x pytest -rA"), Some("pytest"));
-        assert_eq!(allowlist_program("sh check.sh"), Some("sh"));
-        assert_eq!(allowlist_program("FOO=bar"), None);
-    }
-
-    #[test]
     fn resolves_programs_on_the_given_path_only() {
         let dir = tempfile::TempDir::new().expect("temp dir");
         executable(&dir.path().join("mytool"));
@@ -369,6 +358,7 @@ mod tests {
         let missing = check_command("sh missing.sh", dir.path(), &path);
         assert!(!missing.ok && missing.detail.contains("does not exist"), "{}", missing.detail);
         assert!(check_command("sh present.sh", dir.path(), &path).ok);
+        assert!(check_command("SWE=1 PYTHONPATH=x sh present.sh", dir.path(), &path).ok);
         assert!(check_command("python3 -c print", dir.path(), &path).ok);
         assert!(check_command("sh present.sh ...", dir.path(), &path).ok);
     }
