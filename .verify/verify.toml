@@ -8,4 +8,5 @@ commands = [
   ".verify/checks/core_boundary.sh",
   ".verify/run.sh",
   "sh .verify/checks/require_tests.sh -- --test-threads=1",
+  "python3 -B harness/bench/validate_traps.py",
 ]

@@ -11,7 +11,6 @@ ARMS = ("control", "scaffold", "tekmor", "playbook")
 DECISIVE = (("tekmor", "control"), ("tekmor", "scaffold"), ("scaffold", "control"), ("tekmor", "playbook"))
 DESCRIPTIVE = (("playbook", "control"),)
 COMPARISONS = DECISIVE + DESCRIPTIVE
-TAIL = 0.05 / (2 * len(DECISIVE))
 
 
 def load(folder):
@@ -47,7 +46,7 @@ def pooled(tasks_arms, a, b, rng=None):
     return statistics.fmean(diffs) if diffs else None
 
 
-def bootstrap(table, a, b):
+def bootstrap(table, a, b, tail):
     rng = random.Random(SEED)
     tasks = list(table)
     draws = []
@@ -57,7 +56,7 @@ def bootstrap(table, a, b):
         if value is not None:
             draws.append(value)
     draws.sort()
-    return draws[int(TAIL * len(draws))], draws[int((1 - TAIL) * len(draws)) - 1]
+    return draws[int(tail * len(draws))], draws[int((1 - tail) * len(draws)) - 1]
 
 
 def verdict(lo, hi, a, b):
@@ -80,6 +79,8 @@ def mechanism(rows, arm):
         "median_check_runs": statistics.median(r["check_runs"] for r in mine),
         "claimed_pass": sum(r["claimed_pass"] for r in mine),
         "unverified_claims": sum(r["unverified_claim"] for r in mine),
+        "ship_wrong": sum(r.get("ship_wrong", False) for r in mine),
+        "tests_modified": sum(r.get("tests_modified", False) for r in mine),
         "runs_with_gate_block": len(blocked),
         "gate_blocks_in_accepted_runs": sum(
             1 for r in blocked if r["accepted"]
@@ -96,12 +97,22 @@ def mechanism(rows, arm):
 SENSITIVITY_EXCLUDE = "b17_get_path"
 
 
-def report_comparisons(table):
+def arms_present(table):
+    return {arm for arms in table.values() for arm in arms}
+
+
+def tail_for(table):
+    present = arms_present(table)
+    decisive = [pair for pair in DECISIVE if set(pair) <= present]
+    return 0.05 / (2 * max(len(decisive), 1)), len(decisive)
+
+
+def report_comparisons(table, tail):
     for a, b in COMPARISONS:
         effect = pooled(list(table.values()), a, b)
         if effect is None:
             continue
-        lo, hi = bootstrap(table, a, b)
+        lo, hi = bootstrap(table, a, b, tail)
         print(f"  {a} - {b}: {effect:+.3f}  [{lo:+.3f}, {hi:+.3f}]  -> {verdict(lo, hi, a, b)}")
 
 
@@ -111,10 +122,12 @@ def main():
     table = by_task_arm(rows)
     tasks = sorted(table)
     print(f"runs: {len(all_rows)}   excluded for hidden-file references: {len(all_rows) - len(rows)}   analysed: {len(rows)}   tasks: {len(tasks)}")
-    print(f"effect = mean over tasks of (accepted rate in A minus accepted rate in B); cluster bootstrap, {100 * (1 - 2 * TAIL):.2f}% intervals (Bonferroni over {len(DECISIVE)} decisive comparisons; playbook minus control is descriptive and unadjusted)")
-    report_comparisons(table)
-    print(f"sensitivity, excluding {SENSITIVITY_EXCLUDE}:")
-    report_comparisons({t: v for t, v in table.items() if t != SENSITIVITY_EXCLUDE})
+    tail, decisive = tail_for(table)
+    print(f"effect = mean over tasks of (accepted rate in A minus accepted rate in B); cluster bootstrap, {100 * (1 - 2 * tail):.2f}% intervals (Bonferroni over the {decisive} decisive comparisons whose arms were run; playbook minus control is descriptive)")
+    report_comparisons(table, tail)
+    if SENSITIVITY_EXCLUDE in table:
+        print(f"sensitivity, excluding {SENSITIVITY_EXCLUDE}:")
+        report_comparisons({t: v for t, v in table.items() if t != SENSITIVITY_EXCLUDE}, tail)
     print()
     print("mechanism (per arm, all runs)")
     for arm in ARMS:
@@ -124,7 +137,8 @@ def main():
         print(
             f"  {arm:9s} runs={m['runs']} accepted={m['accepted']} "
             f"median_check_runs={m['median_check_runs']} claimed_pass={m['claimed_pass']} "
-            f"unverified_claims={m['unverified_claims']} runs_with_gate_block={m['runs_with_gate_block']} "
+            f"unverified_claims={m['unverified_claims']} ship_wrong={m['ship_wrong']} tests_modified={m['tests_modified']} "
+            f"runs_with_gate_block={m['runs_with_gate_block']} "
             f"blocks_in_accepted_runs={m['gate_blocks_in_accepted_runs']} PASSED_receipts={m['passed_receipts']} "
             f"leak_refs={m['leak_refs']} agent_errors={m['agent_errors']}"
         )

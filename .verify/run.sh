@@ -27,6 +27,9 @@ echo "==> lint ratchet"
 echo "==> black-box check of the built binary"
 bash .verify/checks/blackbox.sh
 
+echo "==> harness trap tasks are valid"
+python3 -B harness/bench/validate_traps.py
+
 echo "==> tekmor tests"
 cargo test -p tekmor -- --test-threads=1
 
