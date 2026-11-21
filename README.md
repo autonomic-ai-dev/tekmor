@@ -19,7 +19,7 @@ A receipt proves that your allowlisted command exited 0 on this exact tree: the 
 
 It does not prove:
 
-- That your test suite covers the change. If the existing tests already pass on broken code, the gate opens. `tekmor verify check-checks` runs your checks against known-broken copies in `.verify/broken/`. It covers only the breakages you wrote down.
+- That your test suite covers the change. If the existing tests already pass on broken code, the gate opens. `tekmor verify check-checks` runs your checks against known-broken copies in `.verify/broken/`. It covers only the breakages you wrote down. The receipt also refuses PASSED when the uncommitted change removes or disables tests compared to HEAD, unless a pass review accepts it; a removal that is already committed is not caught, and detection is a pattern match.
 - That the agent's Write and Edit tools were gated. The gates see Bash commands only.
 - Anything about files ending in `.md` or under `.claude/`. They are excluded from the tree hash.
 - Who ran the command. The hash is a SHA-256 over a defined file set, so it shows the content matched, not who ran it.

@@ -73,6 +73,12 @@ fn held_reason(receipt: &Receipt) -> Option<String> {
         .review_gap
         .as_deref()
         .map(|gap| format!("The receipt for this code is NOT VERIFIED: {gap}. Record one with {REVIEW_COMMAND}."))
+        .or_else(|| {
+            receipt
+                .test_gap
+                .as_deref()
+                .map(|gap| format!("The receipt for this code is NOT VERIFIED: {gap} with {REVIEW_COMMAND}, or restore the tests."))
+        })
 }
 
 fn not_counted_reason(cmd: &str) -> String {
@@ -992,6 +998,19 @@ mod tests {
             GateMode::Enforce,
         )?;
         assert!(matches!(outcome, StopOutcome::Verified(_)), "{outcome:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn removing_a_test_blocks_with_the_test_gap() -> Result<()> {
+        let repo = committed_repo(
+            MATRIX_VERIFY,
+            vec![("src/lib.rs", "fn a() {}\n\n#[test]\nfn checks_a() {}\n".to_string())],
+        );
+        let reason = stop_after(&repo, vec![("src/lib.rs", "fn a() {}\n".to_string())])
+            .ok_or_else(|| anyhow::anyhow!("must block"))?;
+        assert!(reason.contains("the change removes 1 test"), "{reason}");
+        assert!(reason.contains("tekmor verify review --verdict pass"), "{reason}");
         Ok(())
     }
 

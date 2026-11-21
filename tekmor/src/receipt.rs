@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::Result;
+use regex::Regex;
 use serde::Serialize;
 
 use tekmor_core::evidence::{flaky_commands, EvidenceRecord};
@@ -63,6 +65,8 @@ pub struct Receipt {
     pub flaky: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_gap: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_gap: Option<String>,
 }
 
 pub fn build_receipt(
@@ -97,6 +101,7 @@ pub fn build_receipt(
         protected_changes: Vec::new(),
         flaky,
         review_gap: None,
+        test_gap: None,
     }
 }
 
@@ -184,6 +189,108 @@ fn load_specs(root: &Path) -> Vec<(String, Vec<Requirement>)> {
         .collect()
 }
 
+fn test_definition() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"#\[(tokio::)?test\]|^\s*(async\s+)?def\s+test_\w*|^\s*func\s+Test\w*\s*\(|\b(it|test)(\.skip)?\s*\(\s*['"`]|\bxit\s*\(\s*['"`]|@Test\b"#)
+            .expect("static regex")
+    })
+}
+
+fn test_skip() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"#\[ignore\b|@pytest\.mark\.(skip|xfail)\b|@unittest\.skip|\b(it|test|describe)\.skip\s*\(|\bx(it|describe)\s*\(|\bt\.Skip(Now|f)?\s*\(|@Disabled\b"#)
+            .expect("static regex")
+    })
+}
+
+struct ChangedLine {
+    path: String,
+    added: bool,
+    text: String,
+}
+
+fn git_text(root: &Path, args: &[&str]) -> String {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+fn changed_lines(root: &Path) -> Vec<ChangedLine> {
+    let mut lines = Vec::new();
+    let mut file: Option<String> = None;
+    for line in git_text(root, &["diff", "HEAD", "--unified=0", "--no-color", "--no-ext-diff"]).lines() {
+        if let Some(header) = line.strip_prefix("diff --git ") {
+            file = header.rsplit_once(" b/").map(|(_, path)| path.to_string());
+            continue;
+        }
+        if line.starts_with("---") || line.starts_with("+++") {
+            continue;
+        }
+        let Some(path) = file.as_ref().filter(|path| verify::is_code_path(path)) else {
+            continue;
+        };
+        let added = line.starts_with('+');
+        if added || line.starts_with('-') {
+            lines.push(ChangedLine { path: path.clone(), added, text: line[1..].to_string() });
+        }
+    }
+    for path in git_text(root, &["ls-files", "--others", "--exclude-standard"])
+        .lines()
+        .filter(|path| verify::is_code_path(path))
+    {
+        let Ok(text) = std::fs::read_to_string(root.join(path)) else {
+            continue;
+        };
+        lines.extend(text.lines().map(|line| ChangedLine { path: path.to_string(), added: true, text: line.to_string() }));
+    }
+    lines
+}
+
+fn tests_text(count: usize) -> String {
+    if count == 1 {
+        "1 test".to_string()
+    } else {
+        format!("{count} tests")
+    }
+}
+
+fn test_gap(root: &Path) -> Option<String> {
+    let lines = changed_lines(root);
+    let count = |added: bool, re: &Regex| lines.iter().filter(|line| line.added == added && re.is_match(&line.text)).count();
+    let removed = count(false, test_definition()).saturating_sub(count(true, test_definition()));
+    let disabled = count(true, test_skip()).saturating_sub(count(false, test_skip()));
+    if removed == 0 && disabled == 0 {
+        return None;
+    }
+    let mut files: Vec<&str> = lines
+        .iter()
+        .filter(|line| if line.added { test_skip().is_match(&line.text) } else { test_definition().is_match(&line.text) })
+        .map(|line| line.path.as_str())
+        .collect();
+    files.sort();
+    files.dedup();
+    let mut parts = Vec::new();
+    if removed > 0 {
+        parts.push(format!("removes {}", tests_text(removed)));
+    }
+    if disabled > 0 {
+        parts.push(format!("disables {}", tests_text(disabled)));
+    }
+    Some(format!(
+        "the change {} compared to HEAD ({}); record an independent pass review to accept it",
+        parts.join(" and "),
+        files.join(", ")
+    ))
+}
+
 pub fn receipt_for_project(store: &BrainStore, root: &Path) -> Result<Receipt> {
     let keys = crate::review::default_store(&crate::config::Config::load()?.home);
     receipt_with_keys(store, root, &keys)
@@ -200,6 +307,11 @@ pub fn receipt_with_keys(store: &BrainStore, root: &Path, keys: &crate::review::
     if let Some(gap) = crate::review::gap(root, keys, code.as_deref()) {
         receipt.verdict = Verdict::NotVerified;
         receipt.review_gap = Some(gap);
+    }
+    let unreviewed = receipt.verdict == Verdict::Passed && !crate::review::passed(root, keys, code.as_deref());
+    if let Some(gap) = unreviewed.then(|| test_gap(root)).flatten() {
+        receipt.verdict = Verdict::NotVerified;
+        receipt.test_gap = Some(gap);
     }
     receipt.requirements = requirement_states(
         &load_specs(root),
@@ -270,6 +382,9 @@ pub fn render_text(receipt: &Receipt) -> String {
     out.push_str(&requirements_text(&receipt.requirements));
     if let Some(gap) = &receipt.review_gap {
         out.push_str(&format!("  review:    {gap}\n"));
+    }
+    if let Some(gap) = &receipt.test_gap {
+        out.push_str(&format!("  tests:     {gap}\n"));
     }
     if !receipt.protected_changes.is_empty() {
         out.push_str(&format!(
@@ -371,6 +486,12 @@ pub fn render_markdown(receipt: &Receipt) -> String {
         None => out.push_str(&format!("{}.\n", not_verified_hint(receipt))),
     }
     out.push_str(&requirements_markdown(&receipt.requirements));
+    if let Some(gap) = &receipt.review_gap {
+        out.push_str(&format!("\n**Review:** {gap}\n"));
+    }
+    if let Some(gap) = &receipt.test_gap {
+        out.push_str(&format!("\n**Tests:** {gap}\n"));
+    }
     if !receipt.protected_changes.is_empty() {
         out.push_str(&format!(
             "\n**Checks changed since last commit:** {}\n",
@@ -714,5 +835,118 @@ mod tests {
         )
         .unwrap();
         assert_eq!(protected_changes(root), [".verify/verify.toml"]);
+    }
+
+    fn git(root: &Path, args: &[&str]) -> Result<()> {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .status()?;
+        anyhow::ensure!(status.success(), "git {args:?} failed");
+        Ok(())
+    }
+
+    fn put(root: &Path, path: &str, text: &str) -> Result<()> {
+        let file = root.join(path);
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(file, text)?;
+        Ok(())
+    }
+
+    fn committed(files: &[(&str, &str)]) -> Result<tempfile::TempDir> {
+        let dir = tempfile::TempDir::new()?;
+        git(dir.path(), &["init", "-q"])?;
+        for (path, text) in files {
+            put(dir.path(), path, text)?;
+        }
+        git(dir.path(), &["add", "-A"])?;
+        git(dir.path(), &["commit", "-qm", "base"])?;
+        Ok(dir)
+    }
+
+    const RUST_TEST: &str = "fn a() {}\n\n#[test]\nfn checks_a() {}\n";
+
+    #[test]
+    fn deleting_a_rust_test_is_a_test_gap() -> Result<()> {
+        let dir = committed(&[("src/lib.rs", RUST_TEST)])?;
+        put(dir.path(), "src/lib.rs", "fn a() {}\n")?;
+        let gap = test_gap(dir.path()).ok_or_else(|| anyhow::anyhow!("expected a gap"))?;
+        assert!(gap.contains("removes 1 test") && gap.contains("src/lib.rs"), "{gap}");
+        Ok(())
+    }
+
+    #[test]
+    fn ignoring_a_rust_test_is_a_test_gap() -> Result<()> {
+        let dir = committed(&[("src/lib.rs", RUST_TEST)])?;
+        put(dir.path(), "src/lib.rs", "fn a() {}\n\n#[test]\n#[ignore]\nfn checks_a() {}\n")?;
+        let gap = test_gap(dir.path()).ok_or_else(|| anyhow::anyhow!("expected a gap"))?;
+        assert!(gap.contains("disables 1 test"), "{gap}");
+        Ok(())
+    }
+
+    #[test]
+    fn adding_a_test_is_not_a_test_gap() -> Result<()> {
+        let dir = committed(&[("src/lib.rs", RUST_TEST)])?;
+        put(dir.path(), "src/lib.rs", &format!("{RUST_TEST}\n#[test]\nfn checks_b() {{}}\n"))?;
+        assert_eq!(test_gap(dir.path()), None);
+        Ok(())
+    }
+
+    #[test]
+    fn moving_a_test_into_a_new_file_is_not_a_test_gap() -> Result<()> {
+        let dir = committed(&[("src/lib.rs", RUST_TEST)])?;
+        put(dir.path(), "src/lib.rs", "fn a() {}\n")?;
+        put(dir.path(), "src/moved.rs", "#[test]\nfn checks_a() {}\n")?;
+        assert_eq!(test_gap(dir.path()), None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_text_in_docs_is_not_a_test_gap() -> Result<()> {
+        let dir = committed(&[("docs/guide.md", "#[test]\nfn example() {}\n")])?;
+        put(dir.path(), "docs/guide.md", "nothing\n")?;
+        assert_eq!(test_gap(dir.path()), None);
+        Ok(())
+    }
+
+    #[test]
+    fn python_and_js_tests_are_guarded() -> Result<()> {
+        let dir = committed(&[
+            ("tests/test_x.py", "def test_x():\n    assert True\n"),
+            ("src/a.test.js", "it('works', () => {});\n"),
+        ])?;
+        put(dir.path(), "tests/test_x.py", "\n")?;
+        put(dir.path(), "src/a.test.js", "it.skip('works', () => {});\n")?;
+        let gap = test_gap(dir.path()).ok_or_else(|| anyhow::anyhow!("expected a gap"))?;
+        assert!(gap.contains("removes 1 test") && gap.contains("disables 1 test"), "{gap}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_passing_run_that_removes_a_test_is_not_verified_until_reviewed() -> Result<()> {
+        let dir = committed(&[
+            ("src/lib.rs", RUST_TEST),
+            (".verify/verify.toml", "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
+        ])?;
+        let aux = tempfile::TempDir::new()?;
+        let store = BrainStore::open(&aux.path().join("t.db"))?;
+        let keys = crate::review::KeyStore::File(aux.path().join("review.key"));
+        put(dir.path(), "src/lib.rs", "fn a() {}\n")?;
+        verify::run_default_step(&store, dir.path(), verify::VerifySource::Cli)?;
+        let receipt = receipt_with_keys(&store, dir.path(), &keys)?;
+        assert_eq!(receipt.verdict, Verdict::NotVerified);
+        assert!(receipt.test_gap.is_some());
+        assert!(render_text(&receipt).contains("  tests:     the change removes 1 test"));
+        assert!(render_markdown(&receipt).contains("**Tests:**"));
+        let hash = receipt.code_hash.clone().ok_or_else(|| anyhow::anyhow!("no code hash"))?;
+        crate::review::record(dir.path(), &keys, &hash, "pass", "reviewer", "tests moved")?;
+        let reviewed = receipt_with_keys(&store, dir.path(), &keys)?;
+        assert_eq!(reviewed.verdict, Verdict::Passed);
+        assert_eq!(reviewed.test_gap, None);
+        Ok(())
     }
 }
