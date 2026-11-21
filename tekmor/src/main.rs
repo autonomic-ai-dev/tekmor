@@ -229,104 +229,57 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
-            if sub == "record" {
-                let route_log_id = flag_value(&args, "--route-log-id");
-                let cause = flag_value(&args, "--cause");
-                let config_path = flag_value(&args, "--config").map(std::path::PathBuf::from);
-                let scenarios = flag_value(&args, "--scenarios").map(std::path::PathBuf::from);
-                let source_raw =
-                    flag_value(&args, "--source").unwrap_or_else(|| "hook".to_string());
-                let source = tekmor::verify::VerifySource::parse(&source_raw)?;
-                if matches!(
-                    source,
-                    tekmor::verify::VerifySource::Cli
-                        | tekmor::verify::VerifySource::Orchestrator
-                ) {
-                    anyhow::bail!(
-                        "verify record cannot store cli/orchestrator evidence; run `tekmor verify -- <cmd>` so the command executes"
-                    );
+            if let Some(n) = flag_value(&args, "--repeat").and_then(|v| v.parse::<u32>().ok()) {
+                let exe = std::env::current_exe()?;
+                let mut rest = Vec::new();
+                let mut i = 2;
+                while i < args.len() {
+                    if args[i] == "--repeat" {
+                        i += 2;
+                        continue;
+                    }
+                    rest.push(args[i].clone());
+                    i += 1;
                 }
-                let exit_code: i32 = flag_value(&args, "--exit")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
-                let cmd: Vec<String> = if let Some(idx) = args.iter().position(|a| a == "--") {
-                    args[idx + 1..].to_vec()
-                } else {
-                    eprintln!(
-                        "Usage: tekmor verify record --exit N [--source cli|orchestrator] [--config PATH] [--scenarios DIR] [--route-log-id ID] [--cause TAG] -- <cmd summary...>"
-                    );
+                let mut all_ok = true;
+                for _ in 0..n {
+                    all_ok &= std::process::Command::new(&exe).arg("verify").args(&rest).status()?.success();
+                }
+                if !all_ok {
                     std::process::exit(1);
-                };
-                let report = tekmor::verify::record_from_result(
-                    &store,
-                    exit_code,
-                    &cmd.join(" "),
-                    tekmor::verify::VerifyRecord {
-                        route_log_id: route_log_id.as_deref(),
-                        cause_tag: cause.as_deref(),
-                        config_path: config_path.as_deref(),
-                        scenarios_dir: scenarios.as_deref(),
-                        cwd: None,
-                        source,
-                    },
-                )?;
-                println!("{}", serde_json::to_string_pretty(&report)?);
-                if !report.success {
-                    std::process::exit(report.exit_code);
                 }
+                return Ok(());
+            }
+            let route_log_id = flag_value(&args, "--route-log-id");
+            let cause = flag_value(&args, "--cause");
+            let config_path = flag_value(&args, "--config").map(std::path::PathBuf::from);
+            let scenarios = flag_value(&args, "--scenarios").map(std::path::PathBuf::from);
+            let source_raw = flag_value(&args, "--source").unwrap_or_else(|| "cli".to_string());
+            let source = tekmor::verify::VerifySource::parse(&source_raw)?;
+            let save_artifact = args.iter().any(|a| a == "--save-artifact");
+            let cmd: Vec<String> = if let Some(idx) = args.iter().position(|a| a == "--") {
+                args[idx + 1..].to_vec()
             } else {
-                if let Some(n) = flag_value(&args, "--repeat").and_then(|v| v.parse::<u32>().ok()) {
-                    let exe = std::env::current_exe()?;
-                    let mut rest = Vec::new();
-                    let mut i = 2;
-                    while i < args.len() {
-                        if args[i] == "--repeat" {
-                            i += 2;
-                            continue;
-                        }
-                        rest.push(args[i].clone());
-                        i += 1;
-                    }
-                    let mut all_ok = true;
-                    for _ in 0..n {
-                        all_ok &= std::process::Command::new(&exe).arg("verify").args(&rest).status()?.success();
-                    }
-                    if !all_ok {
-                        std::process::exit(1);
-                    }
-                    return Ok(());
-                }
-                let route_log_id = flag_value(&args, "--route-log-id");
-                let cause = flag_value(&args, "--cause");
-                let config_path = flag_value(&args, "--config").map(std::path::PathBuf::from);
-                let scenarios = flag_value(&args, "--scenarios").map(std::path::PathBuf::from);
-                let source_raw = flag_value(&args, "--source").unwrap_or_else(|| "cli".to_string());
-                let source = tekmor::verify::VerifySource::parse(&source_raw)?;
-                let save_artifact = args.iter().any(|a| a == "--save-artifact");
-                let cmd: Vec<String> = if let Some(idx) = args.iter().position(|a| a == "--") {
-                    args[idx + 1..].to_vec()
-                } else {
-                    eprintln!(
-                        "Usage: tekmor verify [--source cli|orchestrator] [--config PATH] [--scenarios DIR] [--route-log-id ID] [--cause TAG] [--save-artifact] -- <cmd> [args...]\n       tekmor verify init [--force] [--dir DIR]\n       tekmor verify record --exit N [--source ...] -- <cmd summary...>"
-                    );
-                    std::process::exit(1);
-                };
-                let report = tekmor::verify::run_verify(
-                    &store,
-                    &cmd,
-                    tekmor::verify::VerifyRun {
-                        route_log_id: route_log_id.as_deref(),
-                        cause_tag: cause.as_deref(),
-                        config_path: config_path.as_deref(),
-                        scenarios_dir: scenarios.as_deref(),
-                        source,
-                        save_artifact,
-                    },
-                )?;
-                println!("{}", serde_json::to_string_pretty(&report)?);
-                if !report.success {
-                    std::process::exit(report.exit_code);
-                }
+                eprintln!(
+                    "Usage: tekmor verify [--source cli|orchestrator] [--config PATH] [--scenarios DIR] [--route-log-id ID] [--cause TAG] [--save-artifact] -- <cmd> [args...]\n       tekmor verify init [--force] [--dir DIR]"
+                );
+                std::process::exit(1);
+            };
+            let report = tekmor::verify::run_verify(
+                &store,
+                &cmd,
+                tekmor::verify::VerifyRun {
+                    route_log_id: route_log_id.as_deref(),
+                    cause_tag: cause.as_deref(),
+                    config_path: config_path.as_deref(),
+                    scenarios_dir: scenarios.as_deref(),
+                    source,
+                    save_artifact,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.success {
+                std::process::exit(report.exit_code);
             }
         }
         "help" | "--help" | "-h" => cli_help::print_root(),
