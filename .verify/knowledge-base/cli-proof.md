@@ -19,3 +19,5 @@ The stop gate treats any changed file as code unless it is a doc, a proof or hoo
 The stop gate uses the receipt's verdict, including the review gap, so the gate and `tekmor verify receipt` cannot disagree. Evidence is scoped by project key, head SHA and code hash; the older filter that counted a run only when its log existed under `.verify/artifacts` is gone.
 
 A passing run does not prove the tests still exist, so the receipt also checks the uncommitted diff against HEAD for removed test definitions and added skip markers. A net loss makes the receipt NOT VERIFIED until a signed pass review accepts it. A skipped `it.skip(` or `xit(` still counts as a definition, so converting a test to skipped counts once as disabled, not also as removed.
+
+The unwrap ratchet counted test code, so it sat at 331 of 332 while production had none. With `exclude_tests` it counts only production lines and its baseline is 0.

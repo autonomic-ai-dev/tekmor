@@ -42,7 +42,7 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
   - Outcome: The extension mechanism is present without any bundled extension.
 
 - `lint-ratchet`: Lint counts may not rise above recorded baselines.
-  - Behaviour: `tekmor verify ratchet` counts each rule's matches in tracked files (`ratchet.rs`, rules in `.verify/ratchet.toml`). `--update` lowers baselines only.
+  - Behaviour: `tekmor verify ratchet` counts each rule's matches in tracked files (`ratchet.rs`, rules in `.verify/ratchet.toml`). `--update` lowers baselines only. A rule with `exclude_tests = true` skips `#[cfg(test)]` items in `.rs` files; `no-unwrap-in-binary` uses it, so its baseline is the production count.
   - Outcome: A new violation fails the command, and the baseline only goes down.
 - `drift-report`: Feature maps must point at code and checks that still exist.
   - Behaviour: `tekmor verify drift` checks each map's code paths and verification commands (`drift.rs`).
