@@ -453,7 +453,7 @@ pub fn record_from_result(
         source,
     } = record;
     if cmd.trim().is_empty() {
-        bail!("verify record requires a non-empty cmd summary after --");
+        bail!("cannot record a run with an empty command");
     }
     let success = exit_code == 0;
     let config_hash = config_path.map(hash_path).transpose()?;

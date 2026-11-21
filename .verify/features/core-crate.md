@@ -17,9 +17,6 @@ Summary: `tekmor-core` holds the pure proof types and the gate rule dispatcher. 
 - `core-gate-rule`: One verdict shape for every gate.
   - Behaviour: `GateRule` and `evaluate` in `crates/tekmor-core/src/gate_rule.rs`. A block beats a warning.
   - Outcome: The bash and commit gates return the same verdict type.
-- `core-verify-types`: The two verify types the CLI reports.
-  - Behaviour: `VerifiedRecipe` and `VerificationStatus` in `crates/tekmor-core/src/types.rs`.
-  - Outcome: Shared shapes for verify output.
 - `core-boundary`: The core crate depends on no storage, runtime or IO crate.
   - Behaviour: `.verify/checks/core_boundary.sh` checks the normal dependency tree against a denylist.
   - Outcome: The script prints `core boundary holds`.

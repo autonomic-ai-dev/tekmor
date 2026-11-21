@@ -23,5 +23,3 @@ pub mod settings;
 pub mod spec;
 pub mod stop_gate;
 pub mod verify;
-
-pub use tekmor_core::types;
