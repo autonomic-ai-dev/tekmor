@@ -248,7 +248,7 @@ pub fn command_is_allowlisted<S: AsRef<str>>(argv: &[S], project_root: Option<&P
     }
     let list = project_root.map(load_command_allowlist).unwrap_or_default();
     if list.is_empty() {
-        return default_allowlist_match(argv);
+        return default_allowlist_match(argv, project_root);
     }
     list.iter().any(|entry| argv_has_prefix(argv, entry))
 }
@@ -278,10 +278,29 @@ const DEFAULT_RUNNERS: &[&str] = &[
     "./mvnw",
 ];
 
-fn default_allowlist_match<S: AsRef<str>>(argv: &[S]) -> bool {
-    argv.first()
-        .is_some_and(|program| program.as_ref().starts_with(".verify/"))
-        || DEFAULT_RUNNERS.iter().any(|entry| argv_has_prefix(argv, entry))
+fn default_allowlist_match<S: AsRef<str>>(argv: &[S], project_root: Option<&Path>) -> bool {
+    match argv.first().map(AsRef::as_ref) {
+        Some(program) if program.starts_with(".verify/") => {
+            verify_script_contained(program, project_root)
+        }
+        _ => DEFAULT_RUNNERS.iter().any(|entry| argv_has_prefix(argv, entry)),
+    }
+}
+
+fn verify_script_contained(program: &str, project_root: Option<&Path>) -> bool {
+    let Some(base) = project_root
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::current_dir().ok())
+    else {
+        return false;
+    };
+    let Ok(verify_dir) = base.join(VERIFY_DIR_NAME).canonicalize() else {
+        return false;
+    };
+    let Ok(resolved) = base.join(program).canonicalize() else {
+        return false;
+    };
+    resolved.starts_with(verify_dir)
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -932,6 +951,8 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
     #[test]
     fn default_runners_must_be_the_program_not_an_argument() -> Result<()> {
         let dir = tempdir()?;
+        fs::create_dir_all(dir.path().join(".verify"))?;
+        fs::write(dir.path().join(".verify/run.sh"), "true")?;
         let root = Some(dir.path());
         assert!(command_is_allowlisted(&["cargo", "test"], root));
         assert!(command_is_allowlisted(&["pytest", "-q"], root));
@@ -940,6 +961,35 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         assert!(!command_is_allowlisted(&["echo", "cargo", "test"], root));
         assert!(!command_is_allowlisted(&["echo", ".verify/run.sh"], root));
         assert!(!command_is_allowlisted::<&str>(&[], root));
+        Ok(())
+    }
+
+    #[test]
+    fn default_verify_program_must_stay_inside_verify_dir() -> Result<()> {
+        let dir = tempdir()?;
+        fs::create_dir_all(dir.path().join(".verify/checks"))?;
+        fs::write(dir.path().join(".verify/run.sh"), "true")?;
+        fs::write(dir.path().join("evil.sh"), "true")?;
+        let root = Some(dir.path());
+        assert!(command_is_allowlisted(&[".verify/run.sh"], root));
+        assert!(command_is_allowlisted(&[".verify/checks/../run.sh"], root));
+        assert!(!command_is_allowlisted(&[".verify/../evil.sh"], root));
+        assert!(!command_is_allowlisted(&[".verify/../../evil.sh"], root));
+        assert!(!command_is_allowlisted(&[".verify/missing.sh"], root));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_verify_program_must_not_escape_through_a_symlink() -> Result<()> {
+        let dir = tempdir()?;
+        fs::create_dir_all(dir.path().join(".verify"))?;
+        fs::write(dir.path().join("evil.sh"), "true")?;
+        std::os::unix::fs::symlink("../evil.sh", dir.path().join(".verify/evil-link.sh"))?;
+        assert!(!command_is_allowlisted(
+            &[".verify/evil-link.sh"],
+            Some(dir.path())
+        ));
         Ok(())
     }
 
