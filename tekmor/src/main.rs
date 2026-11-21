@@ -250,10 +250,6 @@ fn main() -> Result<()> {
                 }
                 return Ok(());
             }
-            let route_log_id = flag_value(&args, "--route-log-id");
-            let cause = flag_value(&args, "--cause");
-            let config_path = flag_value(&args, "--config").map(std::path::PathBuf::from);
-            let scenarios = flag_value(&args, "--scenarios").map(std::path::PathBuf::from);
             let source_raw = flag_value(&args, "--source").unwrap_or_else(|| "cli".to_string());
             let source = tekmor::verify::VerifySource::parse(&source_raw)?;
             let save_artifact = args.iter().any(|a| a == "--save-artifact");
@@ -261,7 +257,7 @@ fn main() -> Result<()> {
                 args[idx + 1..].to_vec()
             } else {
                 eprintln!(
-                    "Usage: tekmor verify [--source cli|orchestrator] [--config PATH] [--scenarios DIR] [--route-log-id ID] [--cause TAG] [--save-artifact] -- <cmd> [args...]\n       tekmor verify init [--force] [--dir DIR]"
+                    "Usage: tekmor verify [--source cli|orchestrator] [--save-artifact] -- <cmd> [args...]\n       tekmor verify init [--force] [--dir DIR]"
                 );
                 std::process::exit(1);
             };
@@ -269,10 +265,6 @@ fn main() -> Result<()> {
                 &store,
                 &cmd,
                 tekmor::verify::VerifyRun {
-                    route_log_id: route_log_id.as_deref(),
-                    cause_tag: cause.as_deref(),
-                    config_path: config_path.as_deref(),
-                    scenarios_dir: scenarios.as_deref(),
                     source,
                     save_artifact,
                 },

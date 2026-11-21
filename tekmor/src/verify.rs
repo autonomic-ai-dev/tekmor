@@ -33,7 +33,7 @@ impl VerifySource {
     pub fn parse(s: &str) -> Result<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "cli" => Ok(Self::Cli),
-            "orchestrator" | "spine" => Ok(Self::Orchestrator),
+            "orchestrator" => Ok(Self::Orchestrator),
             other => bail!(
                 "unknown verify source `{other}` (expected cli|orchestrator)"
             ),
@@ -273,10 +273,6 @@ pub fn run_default_step(
         exit_code,
         &joined,
         VerifyRecord {
-            route_log_id: None,
-            cause_tag: None,
-            config_path: None,
-            scenarios_dir: None,
             cwd: Some(project_root),
             source,
         },
@@ -402,37 +398,23 @@ pub fn find_verify_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
-fn resolve_scenarios_dir(
-    explicit: Option<&Path>,
-    cwd: Option<&Path>,
-) -> Result<(Option<PathBuf>, Option<PathBuf>)> {
-    if let Some(dir) = explicit {
-        return Ok((Some(dir.to_path_buf()), None));
-    }
+fn resolve_scenarios_dir(cwd: Option<&Path>) -> (Option<PathBuf>, Option<PathBuf>) {
     let start = cwd
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     if let Some(root) = find_verify_root(&start) {
         let verify_dir = root.join(VERIFY_DIR_NAME);
-        return Ok((Some(verify_dir), Some(root)));
+        return (Some(verify_dir), Some(root));
     }
-    Ok((None, None))
+    (None, None)
 }
 
 pub struct VerifyRecord<'a> {
-    pub route_log_id: Option<&'a str>,
-    pub cause_tag: Option<&'a str>,
-    pub config_path: Option<&'a Path>,
-    pub scenarios_dir: Option<&'a Path>,
     pub cwd: Option<&'a Path>,
     pub source: VerifySource,
 }
 
-pub struct VerifyRun<'a> {
-    pub route_log_id: Option<&'a str>,
-    pub cause_tag: Option<&'a str>,
-    pub config_path: Option<&'a Path>,
-    pub scenarios_dir: Option<&'a Path>,
+pub struct VerifyRun {
     pub source: VerifySource,
     pub save_artifact: bool,
 }
@@ -444,36 +426,19 @@ pub fn record_from_result(
     cmd: &str,
     record: VerifyRecord<'_>,
 ) -> Result<VerifyReport> {
-    let VerifyRecord {
-        route_log_id,
-        cause_tag,
-        config_path,
-        scenarios_dir,
-        cwd,
-        source,
-    } = record;
+    let VerifyRecord { cwd, source } = record;
     if cmd.trim().is_empty() {
         bail!("cannot record a run with an empty command");
     }
     let success = exit_code == 0;
-    let config_hash = config_path.map(hash_path).transpose()?;
-    let (scenarios, verify_root) = resolve_scenarios_dir(scenarios_dir, cwd)?;
+    let (scenarios, verify_root) = resolve_scenarios_dir(cwd);
     let scenarios_hash = scenarios.as_ref().map(|p| hash_tree(p)).transpose()?;
-    let cause = cause_tag.map(|s| s.to_string()).or_else(|| {
-        if success {
-            None
-        } else {
-            Some(cmd.to_string())
-        }
-    });
-    let resolved_log_id: Option<String> = route_log_id.map(String::from);
+    let cause = (!success).then(|| cmd.to_string());
     let device_id = store.ensure_device_id()?;
     let project_key = crate::project_key::project_key_if_known(cwd.unwrap_or(Path::new(".")));
     let id = store.insert_verify_outcome(
-        resolved_log_id.as_deref(),
         exit_code,
         cause.as_deref(),
-        config_hash.as_deref(),
         scenarios_hash.as_deref(),
         cmd,
         &device_id,
@@ -494,7 +459,7 @@ pub fn record_from_result(
         exit_code,
         success,
         cause_tag: cause,
-        verify_config_hash: config_hash,
+        verify_config_hash: None,
         scenario_dir_hash: scenarios_hash,
         cmd: cmd.to_string(),
         source: source.as_str().to_string(),
@@ -725,17 +690,10 @@ Layout follows the agstack verification skill.
     Ok(verify_dir)
 }
 
-pub fn run_verify(store: &BrainStore, cmd: &[String], run: VerifyRun<'_>) -> Result<VerifyReport> {
-    let VerifyRun {
-        route_log_id,
-        cause_tag,
-        config_path,
-        scenarios_dir,
-        source,
-        save_artifact,
-    } = run;
+pub fn run_verify(store: &BrainStore, cmd: &[String], run: VerifyRun) -> Result<VerifyReport> {
+    let VerifyRun { source, save_artifact } = run;
     if cmd.is_empty() {
-        bail!("usage: tekmor verify [--source cli|orchestrator] [--config PATH] [--scenarios DIR] [--route-log-id ID] [--cause TAG] -- <cmd> [args...]");
+        bail!("usage: tekmor verify [--source cli|orchestrator] [--save-artifact] -- <cmd> [args...]");
     }
     let joined = render_argv(cmd);
     let project_root = std::env::current_dir()
@@ -752,10 +710,6 @@ pub fn run_verify(store: &BrainStore, cmd: &[String], run: VerifyRun<'_>) -> Res
         exit_code,
         &joined,
         VerifyRecord {
-            route_log_id,
-            cause_tag,
-            config_path,
-            scenarios_dir,
             cwd: cwd.as_deref(),
             source,
         },
@@ -809,11 +763,6 @@ fn save_artifact_log(
     let path = dir.join(format!("{report_id}.log"));
     fs::write(&path, output).with_context(|| format!("write {}", path.display()))?;
     Ok(path)
-}
-
-fn hash_path(path: &Path) -> Result<String> {
-    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
 
 const GENERATED_SEGMENTS: [&str; 5] = ["__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "target"];
@@ -938,10 +887,6 @@ mod tests {
             0,
             "cargo test",
             VerifyRecord {
-                route_log_id: None,
-                cause_tag: None,
-                config_path: None,
-                scenarios_dir: None,
                 cwd: Some(dir.path()),
                 source: VerifySource::Cli,
             },
@@ -966,10 +911,7 @@ mod tests {
             VerifySource::parse("orchestrator").unwrap(),
             VerifySource::Orchestrator
         );
-        assert_eq!(
-            VerifySource::parse("spine").unwrap(),
-            VerifySource::Orchestrator
-        );
+        assert!(VerifySource::parse("spine").is_err());
         assert!(VerifySource::parse("mcp").is_err());
     }
 

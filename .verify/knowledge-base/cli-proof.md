@@ -29,3 +29,5 @@ The unwrap ratchet counted test code, so it sat at 331 of 332 while production h
 `tekmor doctor` checks what the gates use: the repo root rather than the shell directory, a `verify.toml` that does not parse (a FAIL, not an empty allowlist), interpreter scripts that must exist under the root, hook binaries found through `env` and `KEY=VALUE` wrappers and compared after following symlinks, and a store path that must be a file whose nearest existing parent is writable.
 
 The extension mechanism (`tekmor ext`, `extensions.rs`, `registry_sync.rs`) was removed. Nothing ever synced the registry cache that `ext add` read its manifest from, so no extension could be installed. Its removal also removed `ureq`, the only network client, so the egress guard now expects no network files.
+
+`tekmor verify` takes only `--source cli|orchestrator`, `--save-artifact` and `--repeat N` before `--`. The agent-brain flags `--route-log-id`, `--cause`, `--config` and `--scenarios` were removed because nothing read what they stored; the `route_log_id` and `verify_config_hash` columns stay in the schema and are written as NULL.

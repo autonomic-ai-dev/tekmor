@@ -6,6 +6,7 @@ The release history starts at v1.0.0. Earlier history is in git.
 
 ### Removed
 
+- `tekmor verify` flags `--route-log-id`, `--cause`, `--config` and `--scenarios`, and the `spine` alias for `--source orchestrator`. Their values were stored but never read. The database columns stay, and `verify_config_hash` in the JSON report is always null.
 - `tekmor ext list|add|remove`. `ext add` could not install anything because the registry it read was never synced. tekmor now opens no network connection. A `registry:` section in `config.yaml` is ignored.
 
 ## [1.0.0]
