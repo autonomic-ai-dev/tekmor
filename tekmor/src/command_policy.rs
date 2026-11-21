@@ -914,7 +914,7 @@ fn record_gate_event(kind: &str, reason: &str) {
         return;
     };
     if let Err(err) =
-        crate::gate_events::record(&config.logs_dir.join("gate-events.jsonl"), kind, reason)
+        crate::gate_events::record(&config.logs_dir.join("gate-events.jsonl"), kind, reason, &[])
     {
         tracing::warn!(error = %err, "gate event write failed");
     }

@@ -43,6 +43,41 @@ pub enum StopOutcome {
     HandBack(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopReason {
+    Verified,
+    Clear,
+    CheckMissing,
+    CheckFailed,
+    FeatureMapGap,
+    ReviewGap,
+    TestsRemoved,
+    NotCounted,
+    PassClaim,
+}
+
+impl StopReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::Clear => "clear",
+            Self::CheckMissing => "check-missing",
+            Self::CheckFailed => "check-failed",
+            Self::FeatureMapGap => "feature-map-gap",
+            Self::ReviewGap => "review-gap",
+            Self::TestsRemoved => "tests-removed",
+            Self::NotCounted => "not-counted",
+            Self::PassClaim => "pass-claim",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Stop {
+    pub outcome: StopOutcome,
+    pub reason: StopReason,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Decision {
     Allow,
@@ -64,7 +99,7 @@ fn receipt_proof(receipt: &Receipt) -> Option<String> {
     Some(proof_line(&evidence.cmd, receipt.code_hash.as_deref()))
 }
 
-fn held_reason(receipt: &Receipt) -> Option<String> {
+fn held_reason(receipt: &Receipt) -> Option<(StopReason, String)> {
     let passing = receipt.evidence.as_ref().is_some_and(|e| e.exit_code == 0);
     if !passing || receipt.verdict == Verdict::Passed {
         return None;
@@ -72,12 +107,12 @@ fn held_reason(receipt: &Receipt) -> Option<String> {
     receipt
         .review_gap
         .as_deref()
-        .map(|gap| format!("The receipt for this code is NOT VERIFIED: {gap}. Record one with {REVIEW_COMMAND}."))
+        .map(|gap| (StopReason::ReviewGap, format!("The receipt for this code is NOT VERIFIED: {gap}. Record one with {REVIEW_COMMAND}.")))
         .or_else(|| {
             receipt
                 .test_gap
                 .as_deref()
-                .map(|gap| format!("The receipt for this code is NOT VERIFIED: {gap} with {REVIEW_COMMAND}, or restore the tests."))
+                .map(|gap| (StopReason::TestsRemoved, format!("The receipt for this code is NOT VERIFIED: {gap} with {REVIEW_COMMAND}, or restore the tests.")))
         })
 }
 
@@ -232,16 +267,32 @@ pub fn run_stop_gate() -> Result<()> {
     let repo_state =
         state_file.with_file_name(format!("stop-gate-state-{}.json", repo_name(&root)));
     let keys = crate::review::default_store(&config.home);
-    let outcome = match evaluate_stop(&store, &root, &keys, &session_id, &repo_state, mode)? {
-        StopOutcome::Clear => claim_gap(&store, &root, transcript.as_deref()).map_or(StopOutcome::Clear, StopOutcome::Block),
+    let Stop { outcome, reason } = match evaluate_stop(&store, &root, &keys, &session_id, &repo_state, mode)? {
+        Stop { outcome: StopOutcome::Clear, .. } => claim_gap(&store, &root, transcript.as_deref()).map_or(
+            Stop {
+                outcome: StopOutcome::Clear,
+                reason: StopReason::Clear,
+            },
+            |message| Stop {
+                outcome: StopOutcome::Block(message),
+                reason: StopReason::PassClaim,
+            },
+        ),
         other => other,
     };
-    if let Some((kind, detail)) = gate_event(&outcome, mode, &root) {
-        if let Err(err) =
-            crate::gate_events::record(&config.logs_dir.join("gate-events.jsonl"), kind, &detail)
-        {
-            tracing::warn!(error = %err, "gate event write failed");
-        }
+    let (kind, detail) = gate_event(&outcome, mode, &root);
+    let repo = repo_name(&root);
+    if let Err(err) = crate::gate_events::record(
+        &config.logs_dir.join("gate-events.jsonl"),
+        kind,
+        &detail,
+        &[
+            ("reason", reason.as_str()),
+            ("repo", repo.as_str()),
+            ("session", session_id.as_str()),
+        ],
+    ) {
+        tracing::warn!(error = %err, "gate event write failed");
     }
     if let StopOutcome::Block(reason) = &outcome {
         hook_blocked(&named_reason(&root, reason));
@@ -261,22 +312,19 @@ fn headline(text: &str) -> String {
         .collect()
 }
 
-fn gate_event(
-    outcome: &StopOutcome,
-    mode: GateMode,
-    root: &Path,
-) -> Option<(&'static str, String)> {
+fn gate_event(outcome: &StopOutcome, mode: GateMode, root: &Path) -> (&'static str, String) {
     match (outcome, mode) {
         (StopOutcome::Block(reason), _) => {
-            Some(("stop-block", headline(&named_reason(root, reason))))
+            ("stop-block", headline(&named_reason(root, reason)))
         }
         (StopOutcome::HandBack(reason), GateMode::Watch) => {
-            Some(("stop-would-block", headline(&named_reason(root, reason))))
+            ("stop-would-block", headline(&named_reason(root, reason)))
         }
         (StopOutcome::HandBack(reason), GateMode::Enforce) => {
-            Some(("stop-handback", headline(&named_reason(root, reason))))
+            ("stop-handback", headline(&named_reason(root, reason)))
         }
-        (StopOutcome::Clear | StopOutcome::Verified(_), _) => None,
+        (StopOutcome::Verified(proof), _) => ("stop-verified", proof.clone()),
+        (StopOutcome::Clear, _) => ("stop-clear", String::new()),
     }
 }
 
@@ -312,10 +360,13 @@ fn evaluate_stop(
     session_id: &str,
     state_file: &Path,
     mode: GateMode,
-) -> Result<StopOutcome> {
+) -> Result<Stop> {
     let changed = changed_paths(root);
     let Some(edit) = last_edit_ms(root, &changed) else {
-        return Ok(StopOutcome::Clear);
+        return Ok(Stop {
+            outcome: StopOutcome::Clear,
+            reason: StopReason::Clear,
+        });
     };
     let gap = feature_gap(root, &changed);
     let code_changed = changed
@@ -331,8 +382,14 @@ fn evaluate_stop(
     let passed = proof.is_some();
     if (!code_changed || passed) && gap.is_none() {
         return Ok(match proof {
-            Some(line) => StopOutcome::Verified(line),
-            None => StopOutcome::Clear,
+            Some(line) => Stop {
+                outcome: StopOutcome::Verified(line),
+                reason: StopReason::Verified,
+            },
+            None => Stop {
+                outcome: StopOutcome::Clear,
+                reason: StopReason::Clear,
+            },
         });
     }
     let blocks = prior_blocks(&load_state(state_file), session_id, edit);
@@ -341,31 +398,49 @@ fn evaluate_stop(
     } else {
         None
     };
-    let reason = match (&step, &gap) {
-        (Some(run), _) if !run.report.success => failure_reason(run),
+    let (reason, detail) = match (&step, &gap) {
+        (Some(run), _) if !run.report.success => {
+            (StopReason::CheckFailed, failure_reason(run))
+        }
         (Some(run), gap) => {
             let after = crate::receipt::receipt_with_keys(store, root, keys)?;
             match (held_reason(&after), gap) {
                 (Some(held), _) => held,
-                (None, Some(gap)) => gap.clone(),
+                (None, Some(gap)) => (StopReason::FeatureMapGap, gap.clone()),
                 (None, None) if after.verdict == Verdict::Passed => {
-                    return Ok(StopOutcome::Verified(proof_line(
-                        &run.report.cmd,
-                        after.code_hash.as_deref(),
-                    )));
+                    return Ok(Stop {
+                        outcome: StopOutcome::Verified(proof_line(
+                            &run.report.cmd,
+                            after.code_hash.as_deref(),
+                        )),
+                        reason: StopReason::Verified,
+                    });
                 }
-                (None, None) => not_counted_reason(&run.report.cmd),
+                (None, None) => (
+                    StopReason::NotCounted,
+                    not_counted_reason(&run.report.cmd),
+                ),
             }
         }
-        (None, _) if code_changed && !passed => {
-            held.unwrap_or_else(|| missing_verification_message(root))
-        }
+        (None, _) if code_changed && !passed => held.unwrap_or((
+            StopReason::CheckMissing,
+            missing_verification_message(root),
+        )),
         (None, gap) => gap
             .clone()
-            .unwrap_or_else(|| missing_verification_message(root)),
+            .map(|gap| (StopReason::FeatureMapGap, gap))
+            .unwrap_or_else(|| {
+                (
+                    StopReason::CheckMissing,
+                    missing_verification_message(root),
+                )
+            }),
     };
     if mode == GateMode::Watch {
-        return Ok(StopOutcome::HandBack(reason));
+        return Ok(Stop {
+            outcome: StopOutcome::HandBack(detail),
+            reason,
+        });
     }
     let verdict = match &gap {
         Some(_) if blocks < STOP_BLOCK_LIMIT => Decision::Block,
@@ -382,9 +457,15 @@ fn evaluate_stop(
             if let Err(err) = save_state(state_file, &next) {
                 eprintln!("stop-gate: could not persist block count: {err:#}");
             }
-            Ok(StopOutcome::Block(reason))
+            Ok(Stop {
+                outcome: StopOutcome::Block(detail),
+                reason,
+            })
         }
-        Decision::Allow => Ok(StopOutcome::HandBack(reason)),
+        Decision::Allow => Ok(Stop {
+            outcome: StopOutcome::HandBack(detail),
+            reason,
+        }),
     }
 }
 
@@ -583,11 +664,24 @@ mod tests {
         state_file: &Path,
     ) -> Result<Option<String>> {
         Ok(
-            match evaluate_stop(store, root, &KeyStore::File(state_file.with_file_name("review.key")), session_id, state_file, GateMode::Enforce)? {
+            match evaluate_stop(store, root, &KeyStore::File(state_file.with_file_name("review.key")), session_id, state_file, GateMode::Enforce)?.outcome {
                 StopOutcome::Block(reason) => Some(reason),
                 StopOutcome::Clear | StopOutcome::Verified(_) | StopOutcome::HandBack(_) => None,
             },
         )
+    }
+
+    fn stop_for(repo: &MatrixRepo) -> Stop {
+        let state = repo.aux.path().join("reason-state.json");
+        evaluate_stop(
+            &repo.store,
+            repo.dir.path(),
+            &test_keys(repo.aux.path()),
+            "s1",
+            &state,
+            GateMode::Enforce,
+        )
+        .expect("evaluate stop")
     }
 
     const FAILING_STEP: &str = "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"echo broken; exit 3\"]\n";
@@ -602,12 +696,12 @@ mod tests {
         let state = aux.path().join("state.json");
         for _ in 0..STOP_BLOCK_LIMIT {
             assert!(matches!(
-                evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap(),
+                evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap().outcome,
                 StopOutcome::Block(_)
             ));
         }
 
-        let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap();
+        let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap().outcome;
         let StopOutcome::HandBack(reason) = &outcome else {
             panic!("expected a hand-back, got {outcome:?}");
         };
@@ -619,8 +713,8 @@ mod tests {
         assert!(message.contains("shop NOT VERIFIED"));
         assert!(message.contains("handed back to you"));
         assert_eq!(
-            gate_event(&outcome, GateMode::Enforce, Path::new("/work/shop")).map(|(kind, _)| kind),
-            Some("stop-handback")
+            gate_event(&outcome, GateMode::Enforce, Path::new("/work/shop")).0,
+            "stop-handback"
         );
     }
 
@@ -632,7 +726,7 @@ mod tests {
         edited_repo(dir.path(), Some(FAILING_STEP));
         let state = aux.path().join("state.json");
         for _ in 0..=STOP_BLOCK_LIMIT {
-            let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Watch).unwrap();
+            let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Watch).unwrap().outcome;
             assert!(matches!(outcome, StopOutcome::HandBack(_)), "{outcome:?}");
             let output = hook_output(&outcome, GateMode::Watch, Path::new("/work/shop")).unwrap();
             assert!(output.get("decision").is_none());
@@ -641,9 +735,8 @@ mod tests {
                 .unwrap()
                 .contains("would have been blocked"));
             assert_eq!(
-                gate_event(&outcome, GateMode::Watch, Path::new("/work/shop"))
-                    .map(|(kind, _)| kind),
-                Some("stop-would-block")
+                gate_event(&outcome, GateMode::Watch, Path::new("/work/shop")).0,
+                "stop-would-block"
             );
         }
         assert!(!state.exists());
@@ -657,7 +750,7 @@ mod tests {
         edited_repo(dir.path(), Some(PASSING_STEP));
         let state = aux.path().join("state.json");
 
-        let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap();
+        let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap().outcome;
         let StopOutcome::Verified(line) = &outcome else {
             panic!("expected VERIFIED, got {outcome:?}");
         };
@@ -669,8 +762,8 @@ mod tests {
         assert!(message.contains("shop VERIFIED"), "{message}");
         assert!(message.contains("`sh -c true` passed"), "{message}");
         assert_eq!(
-            gate_event(&outcome, GateMode::Enforce, Path::new("/work/shop")),
-            None
+            gate_event(&outcome, GateMode::Enforce, Path::new("/work/shop")).0,
+            "stop-verified"
         );
     }
 
@@ -682,7 +775,7 @@ mod tests {
         doc_edited_repo(dir.path(), PASSING_STEP);
         let state = aux.path().join("state.json");
 
-        let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap();
+        let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap().outcome;
         assert_eq!(outcome, StopOutcome::Clear);
         assert_eq!(
             hook_output(&outcome, GateMode::Enforce, Path::new("/work/shop")),
@@ -1000,7 +1093,7 @@ mod tests {
             &state,
             GateMode::Enforce,
         )?;
-        assert!(matches!(outcome, StopOutcome::Verified(_)), "{outcome:?}");
+        assert!(matches!(outcome.outcome, StopOutcome::Verified(_)), "{outcome:?}");
         Ok(())
     }
 
@@ -1294,5 +1387,77 @@ mod tests {
     fn blocking_reason_names_the_repo() {
         let reason = named_reason(Path::new("/work/agentrun"), "Verification is missing.");
         assert_eq!(reason, "Repo agentrun is blocked: Verification is missing.");
+    }
+
+    #[test]
+    fn a_clean_tree_is_a_clear_decision() {
+        let repo = committed_repo(MATRIX_VERIFY, gate_baseline());
+        let stop = stop_for(&repo);
+        assert_eq!(stop.outcome, StopOutcome::Clear);
+        assert_eq!(stop.reason, StopReason::Clear);
+    }
+
+    #[test]
+    fn a_passing_default_step_is_a_verified_decision() {
+        let repo = committed_repo(MATRIX_VERIFY, gate_baseline());
+        let changes = vec![
+            ("src/a.rs", "fn a() {}".to_string()),
+            (GATE_MAP, feature_map(&["src/a.rs", "src/c.rs"])),
+            (GATE_KB, "# gate, updated".to_string()),
+        ];
+        for (path, text) in &changes {
+            write_file(repo.dir.path(), path, text);
+        }
+        let stop = stop_for(&repo);
+        assert!(matches!(stop.outcome, StopOutcome::Verified(_)), "{stop:?}");
+        assert_eq!(stop.reason, StopReason::Verified);
+    }
+
+    #[test]
+    fn a_failing_default_step_is_a_check_failed_decision() {
+        let repo = committed_repo(MATRIX_FAILING_VERIFY, gate_baseline());
+        write_file(repo.dir.path(), "src/b.rs", "fn b() {}");
+        let stop = stop_for(&repo);
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
+        assert_eq!(stop.reason, StopReason::CheckFailed);
+    }
+
+    #[test]
+    fn a_code_change_without_any_run_is_a_check_missing_decision() {
+        let repo = committed_repo("[verify]\ncommands = [\"true\"]\n", gate_baseline());
+        write_file(repo.dir.path(), "src/b.rs", "fn b() {}");
+        let stop = stop_for(&repo);
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
+        assert_eq!(stop.reason, StopReason::CheckMissing);
+    }
+
+    #[test]
+    fn an_unmapped_code_change_after_a_passing_run_is_a_feature_map_gap() {
+        let repo = committed_repo(MATRIX_VERIFY, gate_baseline());
+        write_file(repo.dir.path(), "src/a.rs", "fn a() {}");
+        let stop = stop_for(&repo);
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
+        assert_eq!(stop.reason, StopReason::FeatureMapGap);
+    }
+
+    #[test]
+    fn a_risky_change_without_a_review_is_a_review_gap() {
+        let repo = reviewed_repo();
+        write_file(repo.dir.path(), "src/a.py", "x = 1\n");
+        let stop = stop_for(&repo);
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
+        assert_eq!(stop.reason, StopReason::ReviewGap);
+    }
+
+    #[test]
+    fn a_removed_test_is_a_tests_removed_decision() {
+        let repo = committed_repo(
+            MATRIX_VERIFY,
+            vec![("src/lib.rs", "fn a() {}\n\n#[test]\nfn checks_a() {}\n".to_string())],
+        );
+        write_file(repo.dir.path(), "src/lib.rs", "fn a() {}\n");
+        let stop = stop_for(&repo);
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
+        assert_eq!(stop.reason, StopReason::TestsRemoved);
     }
 }

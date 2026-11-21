@@ -32,8 +32,8 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
   - Behaviour: `feature_map.rs` reads `.verify/features` and the `## Code` section of each map.
   - Outcome: A stop-gate block points at the map to update.
 - `gate-events`: Appends gate decisions to a log.
-  - Behaviour: `gate_events.rs` writes `gate-events.jsonl` under the logs directory.
-  - Outcome: Gate decisions can be reviewed after the fact.
+  - Behaviour: `gate_events.rs` writes `gate-events.jsonl` under the logs directory. The stop gate records every decision, not just blocks: `stop-clear`, `stop-verified`, `stop-block`, `stop-handback` and `stop-would-block` each carry a `reason` code (`verified`, `clear`, `check-missing`, `check-failed`, `feature-map-gap`, `review-gap`, `tests-removed`, `not-counted`, `pass-claim`) plus `repo` and `session` fields. Bash-gate events are unchanged (`bash-warn`, `bash-block`).
+  - Outcome: Gate decisions can be reviewed after the fact, including how often a turn ends with changed code and no proof.
 - `claude-gate-hooks`: Registers the gates in Claude Code settings.
   - Behaviour: `tekmor install [--global] [--quiet]` writes a PreToolUse Bash entry (`bash-gate`) and a Stop entry (`stop-gate`) into the settings file (`host_hooks.rs`). Any other option fails before anything is written (`tests/install.rs`).
   - Outcome: Only the two proof gates are registered, and a host flag that is not supported cannot install them by accident.
