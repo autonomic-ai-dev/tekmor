@@ -1,6 +1,7 @@
 [verify]
 commands = [
   "cargo check",
+  "cargo check -p tekmor",
   "cargo clippy",
   "cargo test -p tekmor-core",
   "cargo test -p tekmor -- --test-threads=1",
