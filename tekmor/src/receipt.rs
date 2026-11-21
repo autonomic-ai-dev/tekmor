@@ -185,6 +185,11 @@ fn load_specs(root: &Path) -> Vec<(String, Vec<Requirement>)> {
 }
 
 pub fn receipt_for_project(store: &BrainStore, root: &Path) -> Result<Receipt> {
+    let keys = crate::review::default_store(&crate::config::Config::load()?.home);
+    receipt_with_keys(store, root, &keys)
+}
+
+pub fn receipt_with_keys(store: &BrainStore, root: &Path, keys: &crate::review::KeyStore) -> Result<Receipt> {
     let head = verify::git_head_sha(root);
     let code = verify::code_tree_hash(root);
     let rows = match project_key::project_key_if_known(root) {
@@ -192,8 +197,7 @@ pub fn receipt_for_project(store: &BrainStore, root: &Path) -> Result<Receipt> {
         None => Vec::new(),
     };
     let mut receipt = build_receipt(&rows, head.as_deref(), code.as_deref());
-    let store = crate::review::default_store(&crate::config::Config::load()?.home);
-    if let Some(gap) = crate::review::gap(root, &store, code.as_deref()) {
+    if let Some(gap) = crate::review::gap(root, keys, code.as_deref()) {
         receipt.verdict = Verdict::NotVerified;
         receipt.review_gap = Some(gap);
     }
