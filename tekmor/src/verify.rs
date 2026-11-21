@@ -80,7 +80,22 @@ impl AllowEntry {
     }
 
     pub fn parse(text: &str) -> Self {
-        Self::from_argv(text.split_whitespace().map(str::to_string).collect())
+        let trimmed = text.trim();
+        let mut body = trimmed;
+        let mut open = false;
+        if trimmed.split_whitespace().last() == Some(OPEN_MARKER) {
+            body = trimmed[..trimmed.len() - OPEN_MARKER.len()].trim_end();
+            open = true;
+        }
+        if is_shell_command(body) {
+            return Self {
+                argv: vec!["sh".to_string(), "-c".to_string(), body.to_string()],
+                open: false,
+            };
+        }
+        let mut entry = Self::from_argv(body.split_whitespace().map(str::to_string).collect());
+        entry.open = open;
+        entry
     }
 
     pub fn matches<S: AsRef<str>>(&self, argv: &[S]) -> bool {
@@ -105,6 +120,21 @@ impl AllowEntry {
             self.base()
         }
     }
+}
+
+fn is_shell_command(body: &str) -> bool {
+    if body
+        .chars()
+        .any(|c| "\"'`$|&;<>(){}*?[]~\\".contains(c))
+    {
+        return true;
+    }
+    body.split_whitespace().next().is_some_and(|first| {
+        first.split_once('=').is_some_and(|(name, _)| {
+            name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+    })
 }
 
 impl From<AllowEntryFile> for AllowEntry {
@@ -322,7 +352,7 @@ pub fn command_is_allowlisted<S: AsRef<str>>(argv: &[S], project_root: Option<&P
 }
 
 pub fn command_text_is_allowlisted(cmd: &str, project_root: Option<&Path>) -> bool {
-    let argv: Vec<&str> = cmd.split_whitespace().collect();
+    let argv = AllowEntry::parse(cmd).argv;
     command_is_allowlisted(&argv, project_root)
 }
 
@@ -990,6 +1020,73 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[1].display(), "sh 'a b.sh' ...");
         assert!(command_is_allowlisted(&["sh", "a b.sh", "x"], Some(dir.path())));
+        Ok(())
+    }
+
+    #[test]
+    fn an_entry_with_shell_syntax_parses_to_sh_c() {
+        let ytdlp = r#"python devscripts/run_tests.py --pytest-args="-rA -v""#;
+        let entry = AllowEntry::parse(ytdlp);
+        assert_eq!(entry.argv, vec!["sh", "-c", ytdlp]);
+        assert!(!entry.open);
+
+        let frozen = r#"SWE100_FREEZE_DATE=2024-12-30T17:40:33 PYTHONPATH="/tmp/swe100-clock${PYTHONPATH:+:$PYTHONPATH}" pytest -rA test"#;
+        let entry = AllowEntry::parse(frozen);
+        assert_eq!(entry.argv, vec!["sh", "-c", frozen]);
+        assert!(!entry.open);
+    }
+
+    #[test]
+    fn plain_entries_still_split_on_whitespace() {
+        assert_eq!(
+            AllowEntry::parse("cargo test"),
+            AllowEntry { argv: vec!["cargo".into(), "test".into()], open: false }
+        );
+        assert_eq!(
+            AllowEntry::parse("sh check.sh ..."),
+            AllowEntry { argv: vec!["sh".into(), "check.sh".into()], open: true }
+        );
+        assert_eq!(
+            AllowEntry::parse(".verify/run.sh"),
+            AllowEntry { argv: vec![".verify/run.sh".into()], open: false }
+        );
+    }
+
+    #[test]
+    fn a_leading_assignment_is_shell_but_a_flagged_one_is_not() {
+        assert_eq!(
+            AllowEntry::parse("FOO=bar pytest").argv,
+            vec!["sh", "-c", "FOO=bar pytest"]
+        );
+        let flagged = AllowEntry::parse("pytest -k foo=bar");
+        assert_eq!(flagged.argv, vec!["pytest", "-k", "foo=bar"]);
+        assert!(!flagged.open);
+    }
+
+    #[test]
+    fn a_shell_entry_matches_only_the_sh_c_argv() -> Result<()> {
+        let dir = tempdir()?;
+        fs::create_dir_all(dir.path().join(".verify"))?;
+        let body = r#"python devscripts/run_tests.py --pytest-args="-rA -v""#;
+        fs::write(
+            dir.path().join(".verify/verify.toml"),
+            format!("[verify]\ncommands = ['{body}']\n"),
+        )?;
+        let root = Some(dir.path());
+        assert!(command_is_allowlisted(&["sh", "-c", body], root));
+        assert!(!command_is_allowlisted(
+            &["python", "devscripts/run_tests.py", "--pytest-args=\"-rA", "-v\""],
+            root
+        ));
+        assert!(!command_is_allowlisted(
+            &["python", "devscripts/run_tests.py", "--pytest-args=-rA -v"],
+            root
+        ));
+        assert!(command_text_is_allowlisted(body, root));
+        assert_eq!(
+            load_command_allowlist(dir.path()),
+            [format!("sh -c '{body}'")]
+        );
         Ok(())
     }
 

@@ -194,3 +194,35 @@ fn markdown_and_json_receipts_carry_the_same_verdict() {
     assert_eq!(value["evidence"]["exit_code"], 0);
     assert_eq!(value["evidence"]["cmd"], "make test");
 }
+
+#[test]
+fn a_shell_string_entry_runs_through_sh_c_and_records_a_pass() {
+    let (home, project) = new_project();
+    let home = home.path();
+    let root = project.path();
+    fs::write(root.join("check.sh"), "test \"$FOO\" = bar\n").unwrap();
+    fs::create_dir_all(root.join(".verify")).unwrap();
+    fs::write(
+        root.join(".verify/verify.toml"),
+        "[verify]\ncommands = ['FOO=bar sh check.sh']\n",
+    )
+    .unwrap();
+    commit_all(root, "allowlist");
+
+    let direct = tekmor(home, root, &["verify", "--", "FOO=bar", "sh", "check.sh"]);
+    assert!(
+        !direct.status.success(),
+        "the bare argv must not be allowlisted"
+    );
+
+    let run = tekmor(home, root, &["verify", "--", "sh", "-c", "FOO=bar sh check.sh"]);
+    assert!(
+        run.status.success(),
+        "sh -c run failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let receipt = tekmor(home, root, &["verify", "receipt"]);
+    assert_eq!(receipt.status.code(), Some(0), "{}", stdout(&receipt));
+    assert!(stdout(&receipt).contains("Verify receipt: PASSED"));
+}

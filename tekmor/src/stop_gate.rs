@@ -547,6 +547,22 @@ mod tests {
     }
 
     #[test]
+    fn a_shell_allowlist_entry_is_named_as_a_runnable_sh_c_command() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".verify")).unwrap();
+        fs::write(
+            dir.path().join(".verify/verify.toml"),
+            "[verify]\ncommands = ['FOO=bar sh check.sh']\n",
+        )
+        .unwrap();
+        let message = missing_verification_message(dir.path());
+        assert!(
+            message.contains("tekmor verify -- sh -c 'FOO=bar sh check.sh'"),
+            "{message}"
+        );
+    }
+
+    #[test]
     fn only_code_paths_need_a_verification_run() {
         assert!(verify::is_code_path("tekmor/src/engine.rs"));
         assert!(verify::is_code_path("tekmor/src/stop_gate.rs"));

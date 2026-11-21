@@ -62,6 +62,8 @@ tekmor verify -- .verify/run.sh     # run the project's checks and record them
 tekmor verify receipt               # show the verdict for the current code
 ```
 
+A `commands` entry must match the run's argv exactly (a trailing `...` allows extra args, and an entry may be an argv array). A string entry with shell syntax — quotes, `$`, operators, or a leading `NAME=value` — runs as `sh -c '<entry>'`.
+
 ## Layout
 
 - `tekmor/` — the binary and its CLI.
