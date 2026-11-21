@@ -29,7 +29,6 @@ sha2 = "0.10"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ureq = { version = "3", features = ["json"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 walkdir = "2"
 tempfile = "3"

@@ -68,10 +68,6 @@ tekmor verify receipt               # show the verdict for the current code
 - `tekmor/crates/tekmor-core/` — pure proof types and the gate rule dispatcher, with no storage, runtime or IO dependencies.
 - `.verify/` — this repo's own feature maps, allowlist and checks.
 
-## Extensions
-
-`tekmor ext list|add|remove` manages optional extension binaries. None are bundled.
-
 ## Development
 
 ```

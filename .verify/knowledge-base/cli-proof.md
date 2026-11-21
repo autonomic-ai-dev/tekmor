@@ -1,6 +1,6 @@
 # cli-proof
 
-The proof CLI: verify runs and outcomes, receipt, check summary, stop gate, bash and commit gates, feature-map gap, gate events, Claude gate hooks, and the extension mechanism. Start from the feature map in .verify/features/cli-proof.md.
+The proof CLI: verify runs and outcomes, receipt, check summary, stop gate, bash and commit gates, feature-map gap, gate events, and Claude gate hooks. Start from the feature map in .verify/features/cli-proof.md.
 
 ## Proof hardening (v1 work)
 
@@ -27,3 +27,5 @@ The unwrap ratchet counted test code, so it sat at 331 of 332 while production h
 `main` is a plain synchronous function; the binary has no async code, so tokio is not a dependency. `tempfile` is a normal dependency (used at runtime by `verify` and `check-checks`), so it is not repeated under dev-dependencies.
 
 `tekmor doctor` checks what the gates use: the repo root rather than the shell directory, a `verify.toml` that does not parse (a FAIL, not an empty allowlist), interpreter scripts that must exist under the root, hook binaries found through `env` and `KEY=VALUE` wrappers and compared after following symlinks, and a store path that must be a file whose nearest existing parent is writable.
+
+The extension mechanism (`tekmor ext`, `extensions.rs`, `registry_sync.rs`) was removed. Nothing ever synced the registry cache that `ext add` read its manifest from, so no extension could be installed. Its removal also removed `ureq`, the only network client, so the egress guard now expects no network files.

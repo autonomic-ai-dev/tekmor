@@ -10,14 +10,8 @@ static SETTINGS_CACHE: std::sync::Mutex<
     Option<(PathBuf, std::time::SystemTime, AgentBrainSettings)>,
 > = std::sync::Mutex::new(None);
 
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AgentBrainSettings {
-    #[serde(default)]
-    pub registry: RegistrySettings,
     #[serde(default)]
     pub gates: GateSettings,
 }
@@ -50,52 +44,6 @@ fn stop_gate_override(value: Option<&str>) -> Option<GateMode> {
         Some("watch") => Some(GateMode::Watch),
         Some("enforce") => Some(GateMode::Enforce),
         _ => None,
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RegistrySettings {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// GitHub repo slug for raw registry fetch (future: autonomic-ai-dev/agent-registry).
-    #[serde(default = "default_registry_remote_repo")]
-    pub remote_repo: String,
-    #[serde(default = "default_registry_remote_ref")]
-    pub remote_ref: String,
-    #[serde(default = "default_registry_subpath")]
-    pub registry_subpath: String,
-    #[serde(default = "default_registry_sync_interval_hours")]
-    pub sync_interval_hours: u32,
-    #[serde(default = "default_true")]
-    pub sync_on_doctor: bool,
-}
-
-fn default_registry_remote_repo() -> String {
-    "autonomic-ai-dev/agent-registry".into()
-}
-
-fn default_registry_remote_ref() -> String {
-    "master".into()
-}
-
-fn default_registry_subpath() -> String {
-    String::new()
-}
-
-fn default_registry_sync_interval_hours() -> u32 {
-    24
-}
-
-impl Default for RegistrySettings {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            remote_repo: default_registry_remote_repo(),
-            remote_ref: default_registry_remote_ref(),
-            registry_subpath: default_registry_subpath(),
-            sync_interval_hours: default_registry_sync_interval_hours(),
-            sync_on_doctor: true,
-        }
     }
 }
 

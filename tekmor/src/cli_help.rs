@@ -29,8 +29,7 @@ Commands:\n\
   stop-gate                Stop hook: block a turn that has no passing proof\n\
   bash-gate                PreToolUse hook: check a shell command before it runs\n\
   commit-gate              PreToolUse hook: refuse commits that skip git hooks\n\
-  install [--global]       Register the gates in Claude Code settings\n\
-  ext list|add|remove      Manage optional extensions\n\n\
+  install [--global]       Register the gates in Claude Code settings\n\n\
 Run `tekmor help <command>` for details."
     );
 }
@@ -43,7 +42,6 @@ pub fn print_command(cmd: &str) -> bool {
         "bash-gate" => "Usage:  tekmor bash-gate\n\nClaude Code PreToolUse hook for Bash. Blocks or warns on risky commands.\n",
         "commit-gate" => "Usage:  tekmor commit-gate\n\nRefuses commits that skip git hooks.\n",
         "install" => "Usage:  tekmor install [--global] [--quiet]\n\nRegisters the bash-gate and stop-gate hooks in Claude Code settings.\n",
-        "ext" => "Usage:  tekmor ext [list | add <name> | remove <name>]\n\nManage optional extensions.\n",
         _ => return false,
     };
     println!("{text}");

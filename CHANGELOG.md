@@ -2,6 +2,12 @@
 
 The release history starts at v1.0.0. Earlier history is in git.
 
+## [Unreleased]
+
+### Removed
+
+- `tekmor ext list|add|remove`. `ext add` could not install anything because the registry it read was never synced. tekmor now opens no network connection. A `registry:` section in `config.yaml` is ignored.
+
 ## [1.0.0]
 
 tekmor is a proof eval for coding agents.

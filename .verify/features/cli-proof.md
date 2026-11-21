@@ -37,9 +37,6 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
 - `claude-gate-hooks`: Registers the gates in Claude Code settings.
   - Behaviour: `tekmor install [--global] [--quiet]` writes a PreToolUse Bash entry (`bash-gate`) and a Stop entry (`stop-gate`) into the settings file (`host_hooks.rs`). Any other option fails before anything is written (`tests/install.rs`).
   - Outcome: Only the two proof gates are registered, and a host flag that is not supported cannot install them by accident.
-- `extensions`: Installs and runs optional extension binaries.
-  - Behaviour: `tekmor ext list|add|remove` (`extensions.rs`, `registry_sync.rs`). Extensions are kept for later use; none are bundled.
-  - Outcome: The extension mechanism is present without any bundled extension.
 
 - `lint-ratchet`: Lint counts may not rise above recorded baselines.
   - Behaviour: `tekmor verify ratchet` counts each rule's matches in tracked files (`ratchet.rs`, rules in `.verify/ratchet.toml`). `--update` lowers baselines only. A rule with `exclude_tests = true` skips `#[cfg(test)]` items in `.rs` files; `no-unwrap-in-binary` uses it, so its baseline is the production count.
@@ -83,8 +80,6 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
 - `tekmor/src/spec.rs`
 - `tekmor/src/project_key.rs`
 - `tekmor/src/host_hooks.rs`
-- `tekmor/src/extensions.rs`
-- `tekmor/src/registry_sync.rs`
 - `tekmor/src/settings.rs`
 - `tekmor/src/config.rs`
 - `tekmor/src/global_workspace.rs`
