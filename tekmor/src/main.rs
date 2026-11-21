@@ -47,7 +47,8 @@ fn main() -> Result<()> {
             host_hooks::install_claude_code_hooks(user, quiet)?;
         }
         "doctor" => {
-            let root = std::env::current_dir()?;
+            let cwd = std::env::current_dir()?;
+            let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
             if !tekmor::doctor::run(&root)? {
                 std::process::exit(1);
             }

@@ -25,3 +25,5 @@ The unwrap ratchet counted test code, so it sat at 331 of 332 while production h
 `tekmor verify record` was removed: its default source was rejected by the source parser and both accepted sources were refused by the next guard, so it could never store a run. Runs are recorded only by executing them through `tekmor verify -- <cmd>` or the default step.
 
 `main` is a plain synchronous function; the binary has no async code, so tokio is not a dependency. `tempfile` is a normal dependency (used at runtime by `verify` and `check-checks`), so it is not repeated under dev-dependencies.
+
+`tekmor doctor` checks what the gates use: the repo root rather than the shell directory, a `verify.toml` that does not parse (a FAIL, not an empty allowlist), interpreter scripts that must exist under the root, hook binaries found through `env` and `KEY=VALUE` wrappers and compared after following symlinks, and a store path that must be a file whose nearest existing parent is writable.

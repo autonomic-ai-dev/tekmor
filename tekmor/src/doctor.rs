@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::Value;
 
+const INTERPRETERS: &[&str] = &["sh", "bash", "zsh", "python", "python3", "node", "ruby", "perl"];
+const INLINE_FLAGS: &[&str] = &["-c", "-m", "-e"];
+
 pub struct Finding {
     pub ok: bool,
     pub label: String,
@@ -38,19 +41,43 @@ pub fn hook_binaries(settings: &Value) -> Vec<String> {
     out
 }
 
-fn command_binary(command: &str) -> Option<String> {
-    let first = command.split_whitespace().next()?;
-    let bin = first.trim_matches('\'').trim_matches('"');
-    bin.ends_with("tekmor").then(|| bin.to_string())
+fn is_assignment(token: &str) -> bool {
+    token.split_once('=').is_some_and(|(key, _)| {
+        !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
 }
 
-pub fn resolve_on_path(program: &str, path_var: &str) -> bool {
-    if program.contains('/') {
-        return is_executable(Path::new(program));
+fn command_binary(command: &str) -> Option<String> {
+    let mut tokens = command
+        .split_whitespace()
+        .map(|t| t.trim_matches('\'').trim_matches('"'))
+        .peekable();
+    if tokens.peek() == Some(&"env") {
+        tokens.next();
     }
+    let bin = tokens.find(|t| !is_assignment(t))?;
+    (Path::new(bin).file_name().and_then(|n| n.to_str()) == Some("tekmor")).then(|| bin.to_string())
+}
+
+pub fn same_binary(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+fn find_on_path(program: &str, path_var: &str) -> Option<PathBuf> {
     path_var
         .split(':')
-        .any(|dir| is_executable(&Path::new(dir).join(program)))
+        .map(|dir| Path::new(dir).join(program))
+        .find(|candidate| is_executable(candidate))
+}
+
+pub fn resolve_on_path(program: &str, root: &Path, path_var: &str) -> bool {
+    if program.contains('/') {
+        return is_executable(&root.join(program));
+    }
+    find_on_path(program, path_var).is_some()
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -63,7 +90,42 @@ pub fn allowlist_program(command: &str) -> Option<&str> {
     command.split_whitespace().find(|token| !token.contains('='))
 }
 
-fn check_hooks(root: &Path, current: &Path) -> Vec<Finding> {
+fn interpreter_script<'a>(program: &str, args: &[&'a str]) -> Option<&'a str> {
+    let name = Path::new(program).file_name()?.to_str()?;
+    if !INTERPRETERS.contains(&name) {
+        return None;
+    }
+    if args.first().is_some_and(|first| INLINE_FLAGS.contains(first)) {
+        return None;
+    }
+    args.iter().copied().find(|a| !a.starts_with('-'))
+}
+
+fn check_command(cmd: &str, root: &Path, path_var: &str) -> Finding {
+    let mut tokens: Vec<&str> = cmd.split_whitespace().skip_while(|t| t.contains('=')).collect();
+    if tokens.last() == Some(&"...") {
+        tokens.pop();
+    }
+    let Some((&program, args)) = tokens.split_first() else {
+        return finding(false, "allowlist", format!("`{cmd}` has no program name"));
+    };
+    if !resolve_on_path(program, root, path_var) {
+        let detail = if program.contains('/') {
+            format!("`{cmd}`: `{program}` is not an executable file under {}", root.display())
+        } else {
+            format!("`{cmd}`: `{program}` is not on PATH")
+        };
+        return finding(false, "allowlist", detail);
+    }
+    if let Some(script) = interpreter_script(program, args) {
+        if !root.join(script).is_file() {
+            return finding(false, "allowlist", format!("`{cmd}`: script `{script}` does not exist"));
+        }
+    }
+    finding(true, "allowlist", format!("`{cmd}` resolves to `{program}`"))
+}
+
+fn check_hooks(root: &Path, current: &Path, path_var: &str) -> Vec<Finding> {
     let mut settings: Vec<PathBuf> = vec![root.join(".claude/settings.json")];
     if let Some(home) = dirs::home_dir() {
         settings.push(home.join(".claude/settings.json"));
@@ -81,10 +143,14 @@ fn check_hooks(root: &Path, current: &Path) -> Vec<Finding> {
         };
         for bin in hook_binaries(&value) {
             found += 1;
-            let bin_path = Path::new(&bin);
-            if !is_executable(bin_path) {
+            let bin_path = if bin.contains('/') {
+                PathBuf::from(&bin)
+            } else {
+                find_on_path(&bin, path_var).unwrap_or_else(|| PathBuf::from(&bin))
+            };
+            if !is_executable(&bin_path) {
                 out.push(finding(false, "hooks", format!("{} points at {bin}, which is missing or not executable; run `tekmor install` again", path.display())));
-            } else if bin_path != current {
+            } else if !same_binary(&bin_path, current) {
                 out.push(finding(false, "hooks", format!("{} runs {bin}, not this binary ({}); run `tekmor install` again", path.display(), current.display())));
             } else {
                 out.push(finding(true, "hooks", format!("{} runs {bin}", path.display())));
@@ -122,22 +188,29 @@ fn check_git(root: &Path) -> Vec<Finding> {
     ]
 }
 
-fn check_allowlist(root: &Path) -> Vec<Finding> {
-    let commands = crate::verify::load_command_allowlist(root);
-    if commands.is_empty() {
-        return vec![finding(true, "allowlist", "no allowlist (run `tekmor verify init`)")];
-    }
-    let path_var = std::env::var("PATH").unwrap_or_default();
-    commands
+fn allowlist_parse_failures(root: &Path) -> Vec<Finding> {
+    [".verify/verify.toml", "verify.toml"]
         .iter()
-        .map(|cmd| match allowlist_program(cmd) {
-            Some(program) if resolve_on_path(program, &path_var) => {
-                finding(true, "allowlist", format!("`{cmd}` resolves to `{program}`"))
-            }
-            Some(program) => finding(false, "allowlist", format!("`{cmd}`: `{program}` is not on PATH")),
-            None => finding(false, "allowlist", format!("`{cmd}` has no program name")),
+        .map(|rel| root.join(rel))
+        .filter_map(|path| {
+            let raw = fs::read_to_string(&path).ok()?;
+            let err = toml::from_str::<toml::Value>(&raw).err()?;
+            Some(finding(false, "allowlist", format!("{} does not parse: {}", path.display(), err.message())))
         })
         .collect()
+}
+
+fn check_allowlist(root: &Path, path_var: &str) -> Vec<Finding> {
+    let mut out = allowlist_parse_failures(root);
+    let commands = crate::verify::load_command_allowlist(root);
+    if commands.is_empty() {
+        if out.is_empty() {
+            out.push(finding(true, "allowlist", "no allowlist (run `tekmor verify init`)"));
+        }
+        return out;
+    }
+    out.extend(commands.iter().map(|cmd| check_command(cmd, root, path_var)));
+    out
 }
 
 fn check_drift(root: &Path) -> Vec<Finding> {
@@ -151,27 +224,38 @@ fn check_drift(root: &Path) -> Vec<Finding> {
         .collect()
 }
 
-fn check_store() -> Vec<Finding> {
-    let Ok(config) = crate::config::Config::load() else {
-        return vec![finding(false, "store", "cannot resolve TEKMOR_HOME")];
+fn writable_dir(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|m| m.is_dir() && !m.permissions().readonly())
+        .unwrap_or(false)
+}
+
+fn check_store(db: &Path) -> Vec<Finding> {
+    let shown = db.display();
+    let result = match fs::metadata(db) {
+        Ok(meta) if meta.is_dir() => finding(false, "store", format!("{shown} is a directory, not a database file")),
+        Ok(meta) if meta.permissions().readonly() => finding(false, "store", format!("{shown} is read-only")),
+        Ok(_) => finding(true, "store", format!("writable {shown}")),
+        Err(_) => match db.ancestors().skip(1).find(|a| a.exists()) {
+            Some(dir) if writable_dir(dir) => finding(true, "store", format!("{shown} not created yet (created on first run)")),
+            Some(dir) => finding(false, "store", format!("{shown} cannot be created: {} is not a writable directory", dir.display())),
+            None => finding(false, "store", format!("{shown} cannot be created: no parent directory exists")),
+        },
     };
-    let db = &config.db_path;
-    match fs::metadata(db) {
-        Ok(meta) if !meta.permissions().readonly() => {
-            vec![finding(true, "store", format!("writable {}", db.display()))]
-        }
-        Ok(_) => vec![finding(false, "store", format!("{} is read-only", db.display()))],
-        Err(_) => vec![finding(true, "store", format!("{} not created yet (created on first run)", db.display()))],
-    }
+    vec![result]
 }
 
 pub fn run(root: &Path) -> Result<bool> {
     let current = std::env::current_exe()?;
+    let path_var = std::env::var("PATH").unwrap_or_default();
     let mut findings = Vec::new();
-    findings.extend(check_hooks(root, &current));
+    findings.extend(check_hooks(root, &current, &path_var));
     findings.extend(check_git(root));
-    findings.extend(check_allowlist(root));
-    findings.extend(check_store());
+    findings.extend(check_allowlist(root, &path_var));
+    match crate::config::Config::load() {
+        Ok(config) => findings.extend(check_store(&config.db_path)),
+        Err(_) => findings.push(finding(false, "store", "cannot resolve TEKMOR_HOME")),
+    }
     findings.extend(check_drift(root));
     let mut all_ok = true;
     for f in &findings {
@@ -186,6 +270,15 @@ pub fn run(root: &Path) -> Result<bool> {
 mod tests {
     use super::*;
 
+    fn details(findings: &[Finding]) -> Vec<String> {
+        findings.iter().map(|f| format!("{} {}", f.ok, f.detail)).collect()
+    }
+
+    fn executable(path: &Path) {
+        std::fs::write(path, "#!/bin/sh\n").expect("write executable");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod executable");
+    }
+
     #[test]
     fn reports_a_feature_map_that_points_at_missing_code() {
         let dir = tempfile::TempDir::new().expect("temp dir");
@@ -196,7 +289,7 @@ mod tests {
         )
         .expect("feature map");
         let findings = check_drift(dir.path());
-        assert!(findings.iter().any(|f| !f.ok && f.detail.contains("missing")), "{:?}", findings.iter().map(|f| f.detail.clone()).collect::<Vec<_>>());
+        assert!(findings.iter().any(|f| !f.ok && f.detail.contains("missing")), "{:?}", details(&findings));
     }
 
     #[test]
@@ -211,6 +304,33 @@ mod tests {
     }
 
     #[test]
+    fn finds_tekmor_behind_env_wrappers_and_rejects_lookalikes() {
+        let settings = serde_json::json!({
+            "hooks": {
+                "Stop": [{"hooks": [
+                    {"type": "command", "command": "env TEKMOR=1 /x/tekmor stop-gate"},
+                    {"type": "command", "command": "A=1 '/x/tekmor' stop-gate"},
+                    {"type": "command", "command": "/usr/bin/nottekmor bash-gate"}
+                ]}]
+            }
+        });
+        assert_eq!(hook_binaries(&settings), vec!["/x/tekmor".to_string(), "/x/tekmor".to_string()]);
+    }
+
+    #[test]
+    fn treats_a_symlink_as_the_binary_it_points_at() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let target = dir.path().join("tekmor-real");
+        executable(&target);
+        let link = dir.path().join("tekmor");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        let other = dir.path().join("other");
+        executable(&other);
+        assert!(same_binary(&link, &target));
+        assert!(!same_binary(&link, &other));
+    }
+
+    #[test]
     fn skips_environment_assignments_to_find_the_program() {
         assert_eq!(allowlist_program("SWE=1 PYTHONPATH=x pytest -rA"), Some("pytest"));
         assert_eq!(allowlist_program("sh check.sh"), Some("sh"));
@@ -220,11 +340,56 @@ mod tests {
     #[test]
     fn resolves_programs_on_the_given_path_only() {
         let dir = tempfile::TempDir::new().expect("temp dir");
-        let tool = dir.path().join("mytool");
-        std::fs::write(&tool, "#!/bin/sh\n").expect("write tool");
-        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).expect("chmod tool");
+        executable(&dir.path().join("mytool"));
         let path = dir.path().to_string_lossy().to_string();
-        assert!(resolve_on_path("mytool", &path));
-        assert!(!resolve_on_path("absent-tool", &path));
+        assert!(resolve_on_path("mytool", dir.path(), &path));
+        assert!(!resolve_on_path("absent-tool", dir.path(), &path));
+    }
+
+    #[test]
+    fn resolves_a_relative_program_against_the_repo_root() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join("bin")).expect("bin dir");
+        executable(&dir.path().join("bin/tool"));
+        let elsewhere = tempfile::TempDir::new().expect("other dir");
+        assert!(resolve_on_path("./bin/tool", dir.path(), ""));
+        assert!(check_command("./bin/tool --flag", dir.path(), "").ok);
+        assert!(!resolve_on_path("./bin/tool", elsewhere.path(), ""));
+    }
+
+    #[test]
+    fn checks_that_an_interpreter_script_exists() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).expect("bin dir");
+        executable(&bin.join("sh"));
+        executable(&bin.join("python3"));
+        std::fs::write(dir.path().join("present.sh"), "true\n").expect("present script");
+        let path = bin.to_string_lossy().to_string();
+        let missing = check_command("sh missing.sh", dir.path(), &path);
+        assert!(!missing.ok && missing.detail.contains("does not exist"), "{}", missing.detail);
+        assert!(check_command("sh present.sh", dir.path(), &path).ok);
+        assert!(check_command("python3 -c print", dir.path(), &path).ok);
+        assert!(check_command("sh present.sh ...", dir.path(), &path).ok);
+    }
+
+    #[test]
+    fn reports_a_verify_toml_that_does_not_parse() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join(".verify")).expect("verify dir");
+        std::fs::write(dir.path().join(".verify/verify.toml"), "[verify\ncommands = [\n").expect("verify.toml");
+        let findings = check_allowlist(dir.path(), "");
+        assert!(findings.iter().any(|f| !f.ok && f.label == "allowlist" && f.detail.contains("does not parse")), "{:?}", details(&findings));
+    }
+
+    #[test]
+    fn reports_a_database_path_that_is_a_directory() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let db = dir.path().join("brain.db");
+        std::fs::create_dir_all(&db).expect("db dir");
+        let findings = check_store(&db);
+        assert!(findings.iter().any(|f| !f.ok && f.detail.contains("is a directory")), "{:?}", details(&findings));
+        let fresh = dir.path().join("nested/brain.db");
+        assert!(check_store(&fresh).iter().all(|f| f.ok), "{:?}", details(&check_store(&fresh)));
     }
 }
