@@ -357,8 +357,11 @@ fn evaluate_stop(
                 (None, None) => not_counted_reason(&run.report.cmd),
             }
         }
-        (None, gap) => held
-            .or_else(|| gap.clone())
+        (None, _) if code_changed && !passed => {
+            held.unwrap_or_else(|| missing_verification_message(root))
+        }
+        (None, gap) => gap
+            .clone()
             .unwrap_or_else(|| missing_verification_message(root)),
     };
     if mode == GateMode::Watch {
@@ -1057,6 +1060,25 @@ mod tests {
         let repo = committed_repo(MATRIX_VERIFY, gate_baseline());
         let reason = stop_after(&repo, vec![("src/a.rs", "fn a() {}".to_string())]).unwrap();
         assert!(reason.contains("`gate.md`"));
+    }
+
+    #[test]
+    fn missing_proof_is_reported_before_the_docs_gap_and_the_gap_still_blocks_after() -> Result<()> {
+        let repo = committed_repo("[verify]\ncommands = [\"sh -c ...\"]\n", gate_baseline());
+        let first = stop_after(&repo, vec![("src/a.rs", "fn a() {}".to_string())])
+            .ok_or_else(|| anyhow::anyhow!("must block"))?;
+        assert!(first.starts_with("Verification is missing"), "{first}");
+        assert!(first.contains("`tekmor verify -- sh -c`"), "{first}");
+        assert!(!first.contains("`gate.md`"), "{first}");
+        verify::record_from_result(
+            &repo.store,
+            0,
+            "sh -c true",
+            verify::VerifyRecord { cwd: Some(repo.dir.path()), source: VerifySource::Cli },
+        )?;
+        let after = evaluate(&repo).ok_or_else(|| anyhow::anyhow!("the docs gap must still block"))?;
+        assert!(after.contains("`gate.md`"), "{after}");
+        Ok(())
     }
 
     #[test]

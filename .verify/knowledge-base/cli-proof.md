@@ -31,3 +31,5 @@ The unwrap ratchet counted test code, so it sat at 331 of 332 while production h
 The extension mechanism (`tekmor ext`, `extensions.rs`, `registry_sync.rs`) was removed. Nothing ever synced the registry cache that `ext add` read its manifest from, so no extension could be installed. Its removal also removed `ureq`, the only network client, so the egress guard now expects no network files.
 
 `tekmor verify` takes only `--source cli|orchestrator`, `--save-artifact` and `--repeat N` before `--`. The agent-brain flags `--route-log-id`, `--cause`, `--config` and `--scenarios` were removed because nothing read what they stored; the `route_log_id` and `verify_config_hash` columns stay in the schema and are written as NULL.
+
+When changed code has no passing run and a feature map is also out of date, the stop gate names the missing check first. The documentation gap still blocks, but only after the check passes, so an agent is not sent to write docs for code it has not yet verified.
