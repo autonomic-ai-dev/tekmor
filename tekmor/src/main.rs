@@ -4,8 +4,7 @@ use tracing_subscriber::EnvFilter;
 
 mod cli_help;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("tekmor=info".parse()?))
         .with_writer(std::io::stderr)
