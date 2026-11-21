@@ -33,3 +33,5 @@ The extension mechanism (`tekmor ext`, `extensions.rs`, `registry_sync.rs`) was 
 `tekmor verify` takes only `--source cli|orchestrator`, `--save-artifact` and `--repeat N` before `--`. The agent-brain flags `--route-log-id`, `--cause`, `--config` and `--scenarios` were removed because nothing read what they stored; the `route_log_id` and `verify_config_hash` columns stay in the schema and are written as NULL.
 
 When changed code has no passing run and a feature map is also out of date, the stop gate names the missing check first. The documentation gap still blocks, but only after the check passes, so an agent is not sent to write docs for code it has not yet verified.
+
+The stop gate used to log only blocks, so `gate-events.jsonl` had no denominator for how often a turn ends with changed code and no proof. It now records every decision with a `reason` code (`verified`, `clear`, `check-missing`, `check-failed`, `feature-map-gap`, `review-gap`, `tests-removed`, `not-counted`, `pass-claim`) plus `repo` and `session` fields, so clears and verifies are counted too. Events stay local in `gate-events.jsonl`; nothing is sent anywhere.
