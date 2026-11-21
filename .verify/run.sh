@@ -7,8 +7,8 @@ cd "$REPO_ROOT"
 
 echo "==> [tekmor] Starting verification suite..."
 
-echo "==> cargo check"
-cargo check -p tekmor
+echo "==> cargo clippy (CI gate)"
+cargo clippy -p tekmor --all-targets -- -D warnings
 
 echo "==> tekmor-core boundary"
 .verify/checks/core_boundary.sh
