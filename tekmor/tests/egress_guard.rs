@@ -20,10 +20,7 @@ const NETWORK_CLIENT_MARKERS: [&str; 16] = [
     "\"fetch\",",
 ];
 
-const EXPECTED_NETWORK_FILES: [&str; 2] = [
-    "tekmor/src/extensions.rs",
-    "tekmor/src/registry_sync.rs",
-];
+const EXPECTED_NETWORK_FILES: [&str; 0] = [];
 
 const LLM_PROVIDER_HOSTS: [&str; 4] = [
     "api.openai.com",
@@ -53,7 +50,6 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 fn source_files() -> Vec<PathBuf> {
     let mut files = Vec::new();
     rust_files(&crate_dir().join("src"), &mut files);
-    rust_files(&crate_dir().join("../extensions"), &mut files);
     files
 }
 

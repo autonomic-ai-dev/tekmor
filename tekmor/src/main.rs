@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tekmor::{config::Config, host_hooks};
 use tracing_subscriber::EnvFilter;
 
@@ -283,32 +283,6 @@ fn main() -> Result<()> {
             }
         }
         "help" | "--help" | "-h" => cli_help::print_root(),
-        "ext" => {
-            let config = Config::load()?;
-            match args.get(2).map(String::as_str).unwrap_or("list") {
-                "list" => {
-                    for name in tekmor::extensions::installed(&config.home)? {
-                        println!("{name}");
-                    }
-                }
-                "add" => {
-                    let name = args.get(3).context("usage: tekmor ext add <name>")?;
-                    let path = tekmor::extensions::install(&config.home, name)?;
-                    println!("installed {name} -> {}", path.display());
-                }
-                "remove" => {
-                    let name = args
-                        .get(3)
-                        .context("usage: tekmor ext remove <name>")?;
-                    tekmor::extensions::remove(&config.home, name)?;
-                    println!("removed {name}");
-                }
-                _ => {
-                    eprintln!("Usage: tekmor ext [list | add <name> | remove <name>]");
-                    std::process::exit(1);
-                }
-            }
-        }
         _ => {
             eprintln!("Unknown command: {cmd}");
             cli_help::print_root();
