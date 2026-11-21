@@ -2,7 +2,8 @@
 name = "no-unwrap-in-binary"
 pattern = '\.unwrap\(\)'
 paths = ["tekmor/src"]
-baseline = 332
+baseline = 0
+exclude_tests = true
 
 [[rule]]
 name = "no-todo-markers"
