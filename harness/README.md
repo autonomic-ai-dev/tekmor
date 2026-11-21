@@ -211,3 +211,21 @@ RESULTS_DIR=results/v3-calibration REPS=3 PAR=4 CEILING_USD=20 TASK_GLOB='t[0-9]
 RESULTS_DIR=results/v3-main REPS=5 PAR=4 CEILING_USD=20 TASK_GLOB='<kept tasks>' ARMS="control playbook tekmor" ./run_matrix.sh
 python3 analyze.py results/v3-main
 ```
+
+### v3 Stage 1 result: calibration (2026-11-21)
+
+Run from the tagged commit `eval-v3-preregistered` (`7a10c44`): 36 control runs, 12 tasks x 3 repetitions, `claude-haiku-5-5`, total recorded cost $0.152, no agent errors, no hidden-file references.
+
+| Task | Control accepted | Rule |
+|---|---|---|
+| t01, t02, t03, t04, t05, t06, t07, t08, t11, t12 | 3 of 3 each | dropped |
+| t09_args | 0 of 3 | kept |
+| t10_settings | 2 of 3 | kept |
+
+Control ran the visible tests without being asked in 32 of 36 runs (mean 1.7 test runs per run).
+
+Found after seeing the data, recorded here and not used to change the rule: `t09_args` is invalid for this benchmark. All three runs ran the visible suite, saw it pass and fixed the double-quote case the issue describes; the hidden cases also require single quotes, which the issue does not mention. The validator did not catch it because the naive fix handles single quotes too. The task measures an unstated requirement, not a regression a check could catch.
+
+The one control failure on a valid task (`t10_settings`, repetition 2) is the failure the gate targets: the agent changed the shared `merge`, did not run the tests and reported done.
+
+Outcome under the pre-registration: one valid task remains, so Stage 2 is not run. This is the third interpretation fixed in advance: on these tasks the model already runs the tests, so a gate that requires a passing check has almost no room to change acceptance. It is not evidence that the gate has no effect elsewhere, for example on long sessions where the last edit comes after the last test run, or on slow suites that agents skip.
