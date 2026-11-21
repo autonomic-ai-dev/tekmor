@@ -69,10 +69,8 @@ impl BrainStore {
 
     pub fn insert_verify_outcome(
         &self,
-        route_log_id: Option<&str>,
         exit_code: i32,
         cause_tag: Option<&str>,
-        verify_config_hash: Option<&str>,
         scenario_dir_hash: Option<&str>,
         cmd: &str,
         device_id: &str,
@@ -84,14 +82,12 @@ impl BrainStore {
         self.with_conn(|conn| {
             conn.execute(
                 r#"INSERT INTO verify_outcomes
-                   (id, route_log_id, exit_code, cause_tag, verify_config_hash, scenario_dir_hash, cmd, device_id, recorded_at, source, project_key)
-                   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"#,
+                   (id, exit_code, cause_tag, scenario_dir_hash, cmd, device_id, recorded_at, source, project_key)
+                   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"#,
                 params![
                     id,
-                    route_log_id,
                     exit_code,
                     cause_tag,
-                    verify_config_hash,
                     scenario_dir_hash,
                     cmd,
                     device_id,
