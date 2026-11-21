@@ -20,16 +20,16 @@ pub fn run(root: &Path) -> Result<Vec<Verdict>> {
     if !broken.is_dir() {
         bail!("no broken copy at {BROKEN_DIR}; checks cannot be proven to fail");
     }
-    verify::load_command_allowlist(root)
+    verify::load_allowlist(root)
         .into_iter()
-        .map(|cmd| {
-            let caught = caught_on_broken_copy(root, &broken, &cmd)?;
-            Ok(Verdict { cmd, caught })
+        .map(|entry| {
+            let caught = caught_on_broken_copy(root, &broken, &entry.argv)?;
+            Ok(Verdict { cmd: entry.display(), caught })
         })
         .collect()
 }
 
-fn caught_on_broken_copy(root: &Path, broken: &Path, cmd: &str) -> Result<bool> {
+fn caught_on_broken_copy(root: &Path, broken: &Path, argv: &[String]) -> Result<bool> {
     let copy = tempfile::TempDir::new().context("temp copy")?;
     for path in tracked_files(root)? {
         copy_into(&root.join(&path), &copy.path().join(&path))?;
@@ -38,12 +38,11 @@ fn caught_on_broken_copy(root: &Path, broken: &Path, cmd: &str) -> Result<bool> 
         let rel = entry.path().strip_prefix(broken)?;
         copy_into(entry.path(), &copy.path().join(rel))?;
     }
-    let status = Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
+    let status = Command::new(&argv[0])
+        .args(&argv[1..])
         .current_dir(copy.path())
         .status()
-        .with_context(|| format!("run `{cmd}` on the broken copy"))?;
+        .with_context(|| format!("run `{}` on the broken copy", verify::render_argv(argv)))?;
     Ok(!status.success())
 }
 

@@ -633,8 +633,8 @@ mod tests {
         )
     }
 
-    const FAILING_STEP: &str = "[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"echo broken; exit 3\"]\n";
-    const PASSING_STEP: &str = "[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n";
+    const FAILING_STEP: &str = "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"echo broken; exit 3\"]\n";
+    const PASSING_STEP: &str = "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n";
 
     #[test]
     fn the_turn_is_handed_back_with_the_failure_once_the_block_limit_is_reached() {
@@ -740,7 +740,7 @@ mod tests {
         let store = gate_store(aux.path());
         edited_repo(
             dir.path(),
-            Some("[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
+            Some("[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
         );
         let state = aux.path().join("state.json");
         assert_eq!(
@@ -757,7 +757,7 @@ mod tests {
         let store = gate_store(aux.path());
         edited_repo(
             dir.path(),
-            Some("[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"echo broken; exit 3\"]\n"),
+            Some("[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"echo broken; exit 3\"]\n"),
         );
         let state = aux.path().join("state.json");
         let reason = block_reason(&store, dir.path(), "s1", &state)
@@ -774,7 +774,7 @@ mod tests {
         let store = gate_store(aux.path());
         edited_repo(
             dir.path(),
-            Some("[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"exit 1\"]\n"),
+            Some("[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"exit 1\"]\n"),
         );
         let state = aux.path().join("state.json");
         for _ in 0..STOP_BLOCK_LIMIT {
@@ -808,7 +808,7 @@ mod tests {
         let store = gate_store(aux.path());
         doc_edited_repo(
             dir.path(),
-            "[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"exit 1\"]\n",
+            "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"exit 1\"]\n",
         );
         let state = aux.path().join("state.json");
         assert_eq!(
@@ -866,14 +866,14 @@ mod tests {
         let store = gate_store(aux.path());
         edited_repo(
             dir.path(),
-            Some("[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
+            Some("[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
         );
         let state = aux.path().join("state.json");
         assert_eq!(block_reason(&store, dir.path(), "s1", &state).unwrap(), None);
         assert_eq!(store.list_verify_outcomes(10).unwrap().len(), 1);
         fs::write(
             dir.path().join(".verify/verify.toml"),
-            "[verify]\ncommands = [\"sh -c\", \"true\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
+            "[verify]\ncommands = [\"sh -c ...\", \"true\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
         )
         .unwrap();
         assert_eq!(block_reason(&store, dir.path(), "s1", &state).unwrap(), None);
@@ -887,7 +887,7 @@ mod tests {
         let store = gate_store(aux.path());
         edited_repo(
             dir.path(),
-            Some("[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
+            Some("[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
         );
         let state = aux.path().join("state.json");
         assert_eq!(
@@ -909,7 +909,7 @@ mod tests {
         let store = gate_store(aux.path());
         edited_repo(
             dir.path(),
-            Some("[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
+            Some("[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
         );
         fs::create_dir_all(dir.path().join(".verify/features")).unwrap();
         let state = aux.path().join("state.json");
@@ -926,7 +926,7 @@ mod tests {
         let store = gate_store(aux.path());
         edited_repo(
             dir.path(),
-            Some("[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
+            Some("[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
         );
         fs::create_dir_all(dir.path().join(".verify/features")).unwrap();
         fs::write(
@@ -943,8 +943,8 @@ mod tests {
         );
     }
 
-    const MATRIX_VERIFY: &str = "[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n";
-    const MATRIX_FAILING_VERIFY: &str = "[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"exit 1\"]\n";
+    const MATRIX_VERIFY: &str = "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n";
+    const MATRIX_FAILING_VERIFY: &str = "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"exit 1\"]\n";
     const GATE_MAP: &str = ".verify/features/gate.md";
     const GATE_KB: &str = ".verify/knowledge-base/gate.md";
 

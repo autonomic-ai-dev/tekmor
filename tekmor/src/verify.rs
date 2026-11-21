@@ -50,9 +50,70 @@ struct VerifyTomlFile {
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 struct VerifyTomlSection {
     #[serde(default)]
-    commands: Vec<String>,
+    commands: Vec<AllowEntryFile>,
     #[serde(default)]
     default: Option<DefaultStepFile>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(untagged)]
+enum AllowEntryFile {
+    Text(String),
+    Argv(Vec<String>),
+}
+
+const OPEN_MARKER: &str = "...";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllowEntry {
+    pub argv: Vec<String>,
+    pub open: bool,
+}
+
+impl AllowEntry {
+    fn from_argv(mut argv: Vec<String>) -> Self {
+        let open = argv.last().is_some_and(|last| last == OPEN_MARKER);
+        if open {
+            argv.pop();
+        }
+        Self { argv, open }
+    }
+
+    pub fn parse(text: &str) -> Self {
+        Self::from_argv(text.split_whitespace().map(str::to_string).collect())
+    }
+
+    pub fn matches<S: AsRef<str>>(&self, argv: &[S]) -> bool {
+        let length_ok = if self.open {
+            argv.len() >= self.argv.len()
+        } else {
+            argv.len() == self.argv.len()
+        };
+        !self.argv.is_empty()
+            && length_ok
+            && self.argv.iter().zip(argv).all(|(token, arg)| token == arg.as_ref())
+    }
+
+    pub fn base(&self) -> String {
+        render_argv(&self.argv)
+    }
+
+    pub fn display(&self) -> String {
+        if self.open {
+            format!("{} {OPEN_MARKER}", self.base())
+        } else {
+            self.base()
+        }
+    }
+}
+
+impl From<AllowEntryFile> for AllowEntry {
+    fn from(entry: AllowEntryFile) -> Self {
+        match entry {
+            AllowEntryFile::Text(text) => Self::parse(&text),
+            AllowEntryFile::Argv(argv) => Self::from_argv(argv),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -227,42 +288,46 @@ pub fn run_default_step(
 }
 
 /// Load project command allowlist from `<root>/.verify/verify.toml` or `<root>/verify.toml`.
-pub fn load_command_allowlist(project_root: &Path) -> Vec<String> {
+pub fn load_allowlist(project_root: &Path) -> Vec<AllowEntry> {
     for rel in [".verify/verify.toml", "verify.toml"] {
         let path = project_root.join(rel);
         let Ok(raw) = fs::read_to_string(&path) else {
             continue;
         };
         if let Ok(parsed) = toml::from_str::<VerifyTomlFile>(&raw) {
-            if !parsed.verify.commands.is_empty() {
-                return parsed.verify.commands;
+            let entries: Vec<AllowEntry> = parsed
+                .verify
+                .commands
+                .into_iter()
+                .map(AllowEntry::from)
+                .filter(|entry| !entry.argv.is_empty())
+                .collect();
+            if !entries.is_empty() {
+                return entries;
             }
         }
     }
     Vec::new()
 }
 
+pub fn load_command_allowlist(project_root: &Path) -> Vec<String> {
+    load_allowlist(project_root).iter().map(AllowEntry::base).collect()
+}
+
 pub fn command_is_allowlisted<S: AsRef<str>>(argv: &[S], project_root: Option<&Path>) -> bool {
     if argv.is_empty() {
         return false;
     }
-    let list = project_root.map(load_command_allowlist).unwrap_or_default();
+    let list = project_root.map(load_allowlist).unwrap_or_default();
     if list.is_empty() {
         return default_allowlist_match(argv, project_root);
     }
-    list.iter().any(|entry| argv_has_prefix(argv, entry))
+    list.iter().any(|entry| entry.matches(argv))
 }
 
 pub fn command_text_is_allowlisted(cmd: &str, project_root: Option<&Path>) -> bool {
     let argv: Vec<&str> = cmd.split_whitespace().collect();
     command_is_allowlisted(&argv, project_root)
-}
-
-fn argv_has_prefix<S: AsRef<str>>(argv: &[S], entry: &str) -> bool {
-    let tokens: Vec<&str> = entry.split_whitespace().collect();
-    !tokens.is_empty()
-        && argv.len() >= tokens.len()
-        && tokens.iter().zip(argv).all(|(token, arg)| *token == arg.as_ref())
 }
 
 const DEFAULT_RUNNERS: &[&str] = &[
@@ -272,18 +337,20 @@ const DEFAULT_RUNNERS: &[&str] = &[
     "pytest",
     "npm test",
     "bun test",
-    "go test",
+    "go test ./...",
     "make test",
-    "mvnw",
-    "./mvnw",
+    "./mvnw test",
+    "mvnw test",
 ];
 
 fn default_allowlist_match<S: AsRef<str>>(argv: &[S], project_root: Option<&Path>) -> bool {
     match argv.first().map(AsRef::as_ref) {
         Some(program) if program.starts_with(".verify/") => {
-            verify_script_contained(program, project_root)
+            argv.len() == 1 && verify_script_contained(program, project_root)
         }
-        _ => DEFAULT_RUNNERS.iter().any(|entry| argv_has_prefix(argv, entry)),
+        _ => DEFAULT_RUNNERS
+            .iter()
+            .any(|entry| AllowEntry::parse(entry).matches(argv)),
     }
 }
 
@@ -510,7 +577,7 @@ pub fn init_verify(project_root: &Path, force: bool) -> Result<PathBuf> {
             commands.push("make test".to_string());
         }
         if !commands.is_empty() {
-            commands.push(".verify/run.sh".to_string());
+            commands.push(".verify/run.sh ...".to_string());
         }
 
         let mut toml_content = String::from("[verify]\ncommands = [\n");
@@ -918,16 +985,70 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
 "#,
         )
         .unwrap();
-        assert!(command_text_is_allowlisted(
-            "./mvnw -q verify -DskipITs",
-            Some(dir.path())
-        ));
-        assert!(command_text_is_allowlisted(
-            "cargo test -p tekmor",
-            Some(dir.path())
-        ));
-        assert!(!command_text_is_allowlisted("true", Some(dir.path())));
-        assert!(!command_text_is_allowlisted("echo hi", Some(dir.path())));
+        let root = Some(dir.path());
+        assert!(command_text_is_allowlisted("./mvnw -q verify", root));
+        assert!(command_text_is_allowlisted("cargo test", root));
+        assert!(command_text_is_allowlisted(".verify/run.sh", root));
+        assert!(!command_text_is_allowlisted("./mvnw -q verify -DskipITs", root));
+        assert!(!command_text_is_allowlisted("cargo test -p tekmor", root));
+        assert!(!command_text_is_allowlisted("true", root));
+        assert!(!command_text_is_allowlisted("echo hi", root));
+    }
+
+    #[test]
+    fn exact_entry_refuses_extra_args() -> Result<()> {
+        let dir = tempdir()?;
+        fs::create_dir_all(dir.path().join(".verify"))?;
+        fs::write(dir.path().join(".verify/verify.toml"), "[verify]\ncommands = [\"cargo test\"]\n")?;
+        let root = Some(dir.path());
+        assert!(command_is_allowlisted(&["cargo", "test"], root));
+        assert!(!command_is_allowlisted(&["cargo", "test", "--no-run"], root));
+        assert!(!command_is_allowlisted(&["cargo", "test", "-p", "x"], root));
+        Ok(())
+    }
+
+    #[test]
+    fn open_entry_accepts_trailing_args() -> Result<()> {
+        let dir = tempdir()?;
+        fs::create_dir_all(dir.path().join(".verify"))?;
+        fs::write(dir.path().join(".verify/verify.toml"), "[verify]\ncommands = [\"sh check.sh ...\"]\n")?;
+        let root = Some(dir.path());
+        assert!(command_is_allowlisted(&["sh", "check.sh"], root));
+        assert!(command_is_allowlisted(&["sh", "check.sh", "unit"], root));
+        assert!(!command_is_allowlisted(&["sh", "other.sh"], root));
+        assert!(!command_is_allowlisted(&["sh"], root));
+        assert_eq!(load_command_allowlist(dir.path()), ["sh check.sh"]);
+        Ok(())
+    }
+
+    #[test]
+    fn array_entry_matches_exact_argv() -> Result<()> {
+        let dir = tempdir()?;
+        fs::create_dir_all(dir.path().join(".verify"))?;
+        fs::write(
+            dir.path().join(".verify/verify.toml"),
+            "[verify]\ncommands = [[\"python3\", \"-c\", \"print(1)\"]]\n",
+        )?;
+        let root = Some(dir.path());
+        assert!(command_is_allowlisted(&["python3", "-c", "print(1)"], root));
+        assert!(!command_is_allowlisted(&["python3", "-c", "print(2)"], root));
+        assert!(!command_is_allowlisted(&["python3", "-c"], root));
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_string_and_array_entries_parse() -> Result<()> {
+        let dir = tempdir()?;
+        fs::create_dir_all(dir.path().join(".verify"))?;
+        fs::write(
+            dir.path().join(".verify/verify.toml"),
+            "[verify]\ncommands = [\"cargo test\", [\"sh\", \"a b.sh\", \"...\"]]\n",
+        )?;
+        let entries = load_allowlist(dir.path());
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].display(), "sh 'a b.sh' ...");
+        assert!(command_is_allowlisted(&["sh", "a b.sh", "x"], Some(dir.path())));
+        Ok(())
     }
 
     #[test]
@@ -943,7 +1064,9 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         assert!(!command_is_allowlisted(&["echo", "sh", "check.sh"], root));
         assert!(!command_is_allowlisted(&["cargo", "testing"], root));
         assert!(!command_is_allowlisted(&["cargo"], root));
-        assert!(command_is_allowlisted(&["cargo", "test", "-p", "x"], root));
+        assert!(!command_is_allowlisted(&["cargo", "test", "-p", "x"], root));
+        assert!(!command_is_allowlisted(&["cargo", "test", "--no-run"], root));
+        assert!(command_is_allowlisted(&["cargo", "test"], root));
         assert!(command_is_allowlisted(&["sh", "check.sh"], root));
         Ok(())
     }
@@ -955,8 +1078,12 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         fs::write(dir.path().join(".verify/run.sh"), "true")?;
         let root = Some(dir.path());
         assert!(command_is_allowlisted(&["cargo", "test"], root));
-        assert!(command_is_allowlisted(&["pytest", "-q"], root));
+        assert!(command_is_allowlisted(&["pytest"], root));
         assert!(command_is_allowlisted(&[".verify/run.sh"], root));
+        assert!(!command_is_allowlisted(&["pytest", "-q"], root));
+        assert!(!command_is_allowlisted(&["pytest", "--collect-only"], root));
+        assert!(!command_is_allowlisted(&["cargo", "test", "--no-run"], root));
+        assert!(!command_is_allowlisted(&[".verify/run.sh", "unit"], root));
         assert!(!command_is_allowlisted(&["echo", "pytest"], root));
         assert!(!command_is_allowlisted(&["echo", "cargo", "test"], root));
         assert!(!command_is_allowlisted(&["echo", ".verify/run.sh"], root));
@@ -1054,7 +1181,7 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         let verify_path = init_verify(dir.path(), false).unwrap();
         let toml_str = fs::read_to_string(verify_path.join("verify.toml")).unwrap();
         assert!(toml_str.contains("\"make test\""));
-        assert!(toml_str.contains("\".verify/run.sh\""));
+        assert!(toml_str.contains("\".verify/run.sh ...\""));
     }
 
     #[test]
@@ -1093,7 +1220,7 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         let dir = tempdir().unwrap();
         write_verify_toml(
             dir.path(),
-            "[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\ntimeout_secs = 120\n",
+            "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\ntimeout_secs = 120\n",
         );
         let step = load_default_step(dir.path()).unwrap().unwrap();
         assert_eq!(step.command, vec!["sh", "-c", "true"]);
@@ -1150,7 +1277,7 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
         write_verify_toml(
             dir.path(),
-            "[verify]\ncommands = [\"sh -c\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
+            "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
         );
         let report = run_default_step(&store, dir.path(), VerifySource::Orchestrator)
             .unwrap()
@@ -1206,12 +1333,16 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
 
         let toml_str = fs::read_to_string(verify_path.join("verify.toml")).unwrap();
         assert!(toml_str.contains("cargo test"));
-        assert!(toml_str.contains("\".verify/run.sh\""));
+        assert!(toml_str.contains("\".verify/run.sh ...\""));
         assert!(!toml_str.contains("\".verify/\""));
 
         assert!(command_text_is_allowlisted("cargo test", Some(dir.path())));
         assert!(command_text_is_allowlisted(
             ".verify/run.sh",
+            Some(dir.path())
+        ));
+        assert!(command_text_is_allowlisted(
+            ".verify/run.sh unit",
             Some(dir.path())
         ));
     }
