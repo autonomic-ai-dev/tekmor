@@ -10,3 +10,4 @@ Every command in the maps is on the allowlist in `.verify/verify.toml`.
 | Core proof types and gate rule | [core-crate.md](core-crate.md) | [core-crate](../knowledge-base/core-crate.md) | `cargo test -p tekmor-core` | `.verify/checks/core_boundary.sh` |
 | GitHub Actions CI and release | [ci-pipeline.md](ci-pipeline.md) | [ci-pipeline](../knowledge-base/ci-pipeline.md) | see the map | see the map |
 | Install, release, migration scripts, Makefile, Containerfile | [repo-tooling.md](repo-tooling.md) | [repo-tooling](../knowledge-base/repo-tooling.md) | see the map | see the map |
+| Benchmark harness | [harness.md](harness.md) | [harness](../knowledge-base/harness.md) | `python3 -B harness/bench/validate_traps.py` | see the map |

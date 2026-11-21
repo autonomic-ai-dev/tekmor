@@ -18,7 +18,7 @@ spent() {
   fi
 }
 
-tasks=$(cd "$HERE/tasks" && ls -d b[0-9][0-9]_* | sort)
+tasks=$(cd "$HERE/tasks" && ls -d ${TASK_GLOB:-b[0-9][0-9]_*} | sort)
 echo "tasks: $(echo "$tasks" | wc -l | tr -d ' ')  reps: $REPS  parallel: $PAR  ceiling: \$$CEILING_USD"
 
 for rep in $(seq 1 "$REPS"); do
