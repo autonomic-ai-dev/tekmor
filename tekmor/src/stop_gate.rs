@@ -9,13 +9,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 use crate::db::store::BrainStore;
-use crate::evidence_reader;
 use crate::feature_map;
+use crate::receipt::{Receipt, Verdict};
+use crate::review::KeyStore;
 use crate::settings::{AgentBrainSettings, GateMode};
 use crate::verify::{self, VerifySource};
 
 const BLOCK_REASON: &str = "Verification is missing. Files changed in this repo have no passing `tekmor verify -- <cmd>` run recorded after the last edit. Run the project's checks (for example `cargo test` or the verify suite), let them pass, then finish.";
-const EVIDENCE_LIMIT: usize = 100;
+const REVIEW_COMMAND: &str = "`tekmor verify review --verdict pass --reviewer NAME`";
 const STOP_BLOCK_LIMIT: u32 = 3;
 const STATE_FILE: &str = "stop-gate-state.json";
 
@@ -32,14 +33,6 @@ struct BlockState {
     session_id: String,
     edit_ms: i64,
     blocks: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Evidence {
-    pub cmd: String,
-    pub exit_code: i32,
-    pub source: Option<String>,
-    pub code_hash: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -63,25 +56,27 @@ fn proof_line(cmd: &str, code_hash: Option<&str>) -> String {
     }
 }
 
-fn passing_run<'a>(code_hash: &str, evidence: &'a [Evidence]) -> Option<&'a Evidence> {
-    let counted = |e: &&Evidence| {
-        e.code_hash.as_deref() == Some(code_hash)
-            && matches!(e.source.as_deref(), Some("cli" | "orchestrator"))
-    };
-    let flaky: Vec<&str> = evidence
-        .iter()
-        .filter(counted)
-        .filter(|r| {
-            evidence
-                .iter()
-                .filter(counted)
-                .any(|o| o.cmd == r.cmd && (o.exit_code == 0) != (r.exit_code == 0))
-        })
-        .map(|r| r.cmd.as_str())
-        .collect();
-    evidence
-        .iter()
-        .find(|e| e.exit_code == 0 && counted(e) && !flaky.contains(&e.cmd.as_str()))
+fn receipt_proof(receipt: &Receipt) -> Option<String> {
+    let evidence = receipt
+        .evidence
+        .as_ref()
+        .filter(|_| receipt.verdict == Verdict::Passed)?;
+    Some(proof_line(&evidence.cmd, receipt.code_hash.as_deref()))
+}
+
+fn held_reason(receipt: &Receipt) -> Option<String> {
+    let passing = receipt.evidence.as_ref().is_some_and(|e| e.exit_code == 0);
+    if !passing || receipt.verdict == Verdict::Passed {
+        return None;
+    }
+    receipt
+        .review_gap
+        .as_deref()
+        .map(|gap| format!("The receipt for this code is NOT VERIFIED: {gap}. Record one with {REVIEW_COMMAND}."))
+}
+
+fn not_counted_reason(cmd: &str) -> String {
+    format!("`{cmd}` passed, but the receipt for this code is not PASSED. Run `tekmor verify receipt` to see why, fix it, then finish.")
 }
 
 pub fn decide(verified: bool, blocks_so_far: u32) -> Decision {
@@ -187,20 +182,6 @@ fn feature_gap(root: &Path, changed: &[String]) -> Option<String> {
     )
 }
 
-fn load_evidence(store: &BrainStore, root: &Path) -> Result<Vec<Evidence>> {
-    let has_harness = root.join(".verify").is_dir();
-    Ok(evidence_reader::recent_runs(store, EVIDENCE_LIMIT)?
-        .into_iter()
-        .filter(|row| !has_harness || verify::repo_artifact_path(root, &row.id).is_file())
-        .map(|row| Evidence {
-            cmd: row.cmd,
-            exit_code: row.exit_code,
-            source: row.source,
-            code_hash: row.code_hash,
-        })
-        .collect())
-}
-
 fn claim_gap(store: &BrainStore, root: &Path, transcript: Option<&str>) -> Option<String> {
     let text = crate::claims::last_assistant_text(Path::new(transcript?))?;
     if !crate::claims::claims_passing(&text) {
@@ -244,7 +225,8 @@ pub fn run_stop_gate() -> Result<()> {
     let mode = AgentBrainSettings::load(&config.home).gates.stop;
     let repo_state =
         state_file.with_file_name(format!("stop-gate-state-{}.json", repo_name(&root)));
-    let outcome = match evaluate_stop(&store, &root, &session_id, &repo_state, mode)? {
+    let keys = crate::review::default_store(&config.home);
+    let outcome = match evaluate_stop(&store, &root, &keys, &session_id, &repo_state, mode)? {
         StopOutcome::Clear => claim_gap(&store, &root, transcript.as_deref()).map_or(StopOutcome::Clear, StopOutcome::Block),
         other => other,
     };
@@ -320,6 +302,7 @@ fn hook_output(outcome: &StopOutcome, mode: GateMode, root: &Path) -> Option<ser
 fn evaluate_stop(
     store: &BrainStore,
     root: &Path,
+    keys: &KeyStore,
     session_id: &str,
     state_file: &Path,
     mode: GateMode,
@@ -332,13 +315,13 @@ fn evaluate_stop(
     let code_changed = changed
         .iter()
         .any(|path| verify::is_code_path(path) || verify::is_proof_input(path));
-    let evidence = load_evidence(store, root)?;
-    let proof = code_changed
-        .then(|| verify::code_tree_hash(root))
-        .flatten()
-        .and_then(|hash| {
-            passing_run(&hash, &evidence).map(|run| proof_line(&run.cmd, Some(&hash)))
-        });
+    let current = if code_changed {
+        Some(crate::receipt::receipt_with_keys(store, root, keys)?)
+    } else {
+        None
+    };
+    let proof = current.as_ref().and_then(receipt_proof);
+    let held = current.as_ref().and_then(held_reason);
     let passed = proof.is_some();
     if (!code_changed || passed) && gap.is_none() {
         return Ok(match proof {
@@ -347,22 +330,30 @@ fn evaluate_stop(
         });
     }
     let blocks = prior_blocks(&load_state(state_file), session_id, edit);
-    let step = if code_changed && !passed {
+    let step = if code_changed && !passed && held.is_none() {
         verify::run_default_step(store, root, VerifySource::Cli)?
     } else {
         None
     };
     let reason = match (&step, &gap) {
         (Some(run), _) if !run.report.success => failure_reason(run),
-        (_, Some(gap)) => gap.clone(),
-        (Some(run), None) => {
-            let hash = verify::code_tree_hash(root);
-            return Ok(StopOutcome::Verified(proof_line(
-                &run.report.cmd,
-                hash.as_deref(),
-            )));
+        (Some(run), gap) => {
+            let after = crate::receipt::receipt_with_keys(store, root, keys)?;
+            match (held_reason(&after), gap) {
+                (Some(held), _) => held,
+                (None, Some(gap)) => gap.clone(),
+                (None, None) if after.verdict == Verdict::Passed => {
+                    return Ok(StopOutcome::Verified(proof_line(
+                        &run.report.cmd,
+                        after.code_hash.as_deref(),
+                    )));
+                }
+                (None, None) => not_counted_reason(&run.report.cmd),
+            }
         }
-        (None, None) => missing_verification_message(root),
+        (None, gap) => held
+            .or_else(|| gap.clone())
+            .unwrap_or_else(|| missing_verification_message(root)),
     };
     if mode == GateMode::Watch {
         return Ok(StopOutcome::HandBack(reason));
@@ -417,24 +408,9 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn evidence(exit_code: i32, source: Option<&str>, code_hash: Option<&str>) -> Evidence {
-        Evidence {
-            cmd: "cargo test".to_string(),
-            exit_code,
-            source: source.map(str::to_string),
-            code_hash: code_hash.map(str::to_string),
-        }
-    }
-
     #[test]
     fn blocks_code_change_without_a_run_for_its_tree() {
         assert!(matches!(decide(false, 0), Decision::Block));
-    }
-
-    #[test]
-    fn blocks_run_recorded_for_another_tree() {
-        let ev = [evidence(0, Some("cli"), Some("old-tree"))];
-        assert!(passing_run("new-tree", &ev).is_none());
     }
 
     #[test]
@@ -450,43 +426,6 @@ mod tests {
         )
         .unwrap();
         assert!(claim_gap(&store, dir.path(), transcript.to_str()).is_some());
-    }
-
-    #[test]
-    fn a_flaky_command_is_not_a_passing_run() {
-        let run = |exit_code| Evidence {
-            cmd: "cargo test".into(),
-            exit_code,
-            source: Some("cli".into()),
-            code_hash: Some("tree".into()),
-        };
-        assert!(passing_run("tree", &[run(0), run(1)]).is_none());
-        assert!(passing_run("tree", &[run(0), run(0)]).is_some());
-    }
-
-    #[test]
-    fn blocks_failing_run_for_the_same_tree() {
-        let ev = [evidence(1, Some("cli"), Some("tree"))];
-        assert!(passing_run("tree", &ev).is_none());
-    }
-
-    #[test]
-    fn blocks_run_not_from_trusted_source() {
-        let ev = [evidence(0, Some("hook"), Some("tree"))];
-        assert!(passing_run("tree", &ev).is_none());
-    }
-
-    #[test]
-    fn allows_passing_cli_run_for_the_same_tree() {
-        let ev = [evidence(0, Some("cli"), Some("tree"))];
-        assert!(passing_run("tree", &ev).is_some());
-        assert_eq!(decide(true, 0), Decision::Allow);
-    }
-
-    #[test]
-    fn allows_passing_orchestrator_run_for_the_same_tree() {
-        let ev = [evidence(0, Some("orchestrator"), Some("tree"))];
-        assert!(passing_run("tree", &ev).is_some());
     }
 
     #[test]
@@ -615,6 +554,15 @@ mod tests {
         fs::write(dir.join("changed.md"), b"edit").unwrap();
     }
 
+    fn test_keys(dir: &Path) -> KeyStore {
+        KeyStore::File(dir.join("review.key"))
+    }
+
+    #[test]
+    fn a_verified_stop_is_allowed() {
+        assert_eq!(decide(true, 0), Decision::Allow);
+    }
+
     fn gate_store(dir: &Path) -> BrainStore {
         BrainStore::open(&dir.join("t.db")).unwrap()
     }
@@ -626,7 +574,7 @@ mod tests {
         state_file: &Path,
     ) -> Result<Option<String>> {
         Ok(
-            match evaluate_stop(store, root, session_id, state_file, GateMode::Enforce)? {
+            match evaluate_stop(store, root, &KeyStore::File(state_file.with_file_name("review.key")), session_id, state_file, GateMode::Enforce)? {
                 StopOutcome::Block(reason) => Some(reason),
                 StopOutcome::Clear | StopOutcome::Verified(_) | StopOutcome::HandBack(_) => None,
             },
@@ -645,12 +593,12 @@ mod tests {
         let state = aux.path().join("state.json");
         for _ in 0..STOP_BLOCK_LIMIT {
             assert!(matches!(
-                evaluate_stop(&store, dir.path(), "s1", &state, GateMode::Enforce).unwrap(),
+                evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap(),
                 StopOutcome::Block(_)
             ));
         }
 
-        let outcome = evaluate_stop(&store, dir.path(), "s1", &state, GateMode::Enforce).unwrap();
+        let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap();
         let StopOutcome::HandBack(reason) = &outcome else {
             panic!("expected a hand-back, got {outcome:?}");
         };
@@ -675,7 +623,7 @@ mod tests {
         edited_repo(dir.path(), Some(FAILING_STEP));
         let state = aux.path().join("state.json");
         for _ in 0..=STOP_BLOCK_LIMIT {
-            let outcome = evaluate_stop(&store, dir.path(), "s1", &state, GateMode::Watch).unwrap();
+            let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Watch).unwrap();
             assert!(matches!(outcome, StopOutcome::HandBack(_)), "{outcome:?}");
             let output = hook_output(&outcome, GateMode::Watch, Path::new("/work/shop")).unwrap();
             assert!(output.get("decision").is_none());
@@ -700,7 +648,7 @@ mod tests {
         edited_repo(dir.path(), Some(PASSING_STEP));
         let state = aux.path().join("state.json");
 
-        let outcome = evaluate_stop(&store, dir.path(), "s1", &state, GateMode::Enforce).unwrap();
+        let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap();
         let StopOutcome::Verified(line) = &outcome else {
             panic!("expected VERIFIED, got {outcome:?}");
         };
@@ -725,7 +673,7 @@ mod tests {
         doc_edited_repo(dir.path(), PASSING_STEP);
         let state = aux.path().join("state.json");
 
-        let outcome = evaluate_stop(&store, dir.path(), "s1", &state, GateMode::Enforce).unwrap();
+        let outcome = evaluate_stop(&store, dir.path(), &test_keys(aux.path()), "s1", &state, GateMode::Enforce).unwrap();
         assert_eq!(outcome, StopOutcome::Clear);
         assert_eq!(
             hook_output(&outcome, GateMode::Enforce, Path::new("/work/shop")),
@@ -1005,6 +953,46 @@ mod tests {
             write_file(repo.dir.path(), path, text);
         }
         evaluate(repo)
+    }
+
+    fn reviewed_repo() -> MatrixRepo {
+        committed_repo(
+            MATRIX_VERIFY,
+            vec![(".verify/review.toml", "risky = [\"src/\"]\n".to_string())],
+        )
+    }
+
+    #[test]
+    fn risky_path_change_with_a_passing_run_but_no_review_blocks_with_the_review_gap() -> Result<()> {
+        let repo = reviewed_repo();
+        let first = stop_after(&repo, vec![("src/a.py", "x = 1\n".to_string())])
+            .ok_or_else(|| anyhow::anyhow!("must block"))?;
+        assert!(first.contains("without an independent pass review: src/a.py"), "{first}");
+        assert!(first.contains("tekmor verify review --verdict pass"), "{first}");
+        let again = evaluate(&repo).ok_or_else(|| anyhow::anyhow!("must still block"))?;
+        assert!(again.contains("without an independent pass review"), "{again}");
+        assert_eq!(repo.store.list_verify_outcomes(10)?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn risky_path_change_with_a_pass_review_is_verified() -> Result<()> {
+        let repo = reviewed_repo();
+        write_file(repo.dir.path(), "src/a.py", "x = 1\n");
+        let hash = verify::code_tree_hash(repo.dir.path())
+            .ok_or_else(|| anyhow::anyhow!("no code hash"))?;
+        crate::review::record(repo.dir.path(), &test_keys(repo.aux.path()), &hash, "pass", "reviewer", "ok")?;
+        let state = repo.aux.path().join("state.json");
+        let outcome = evaluate_stop(
+            &repo.store,
+            repo.dir.path(),
+            &test_keys(repo.aux.path()),
+            "s1",
+            &state,
+            GateMode::Enforce,
+        )?;
+        assert!(matches!(outcome, StopOutcome::Verified(_)), "{outcome:?}");
+        Ok(())
     }
 
     fn feature_map(claims: &[&str]) -> String {
