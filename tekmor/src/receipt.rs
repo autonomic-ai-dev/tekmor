@@ -113,7 +113,7 @@ fn latest_run<'a>(
 ) -> Option<&'a EvidenceRecord> {
     let (head, hash) = head_sha.zip(code_hash)?;
     rows.iter()
-        .find(|row| row.cmd == check && row.is_run_for(head, hash) && !flaky_commands(rows, head, hash).contains(&row.cmd))
+        .find(|row| row.cmd == verify::AllowEntry::parse(check).base() && row.is_run_for(head, hash) && !flaky_commands(rows, head, hash).contains(&row.cmd))
 }
 
 pub fn requirement_states(
@@ -718,6 +718,25 @@ mod tests {
         )];
         assert_eq!(
             states(&specs, &rows, &["cargo test login"]),
+            [RequirementState::Proven]
+        );
+    }
+
+    #[test]
+    fn a_shell_check_is_proven_by_its_sh_c_run() {
+        let specs = [spec(
+            "env",
+            "R1. Needs env. check: `FOO=bar sh check.sh`\n",
+        )];
+        let rows = [row(
+            "sh -c 'FOO=bar sh check.sh'",
+            0,
+            Some(HEAD),
+            Some(HASH),
+            Some("cli"),
+        )];
+        assert_eq!(
+            states(&specs, &rows, &["FOO=bar sh check.sh"]),
             [RequirementState::Proven]
         );
     }

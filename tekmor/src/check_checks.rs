@@ -99,6 +99,19 @@ mod tests {
     }
 
     #[test]
+    fn a_shell_entry_runs_through_sh_c() {
+        let dir = repo("[verify]\ncommands = ['FOO=ok grep -q $FOO src.txt']\n", true);
+        let verdicts = run(dir.path()).unwrap();
+        assert_eq!(
+            verdicts,
+            vec![Verdict {
+                cmd: "sh -c 'FOO=ok grep -q $FOO src.txt'".into(),
+                caught: true
+            }]
+        );
+    }
+
+    #[test]
     fn without_a_broken_copy_the_checks_are_unproven() {
         let dir = repo("[verify]\ncommands = [\"true\"]\n", false);
         assert!(run(dir.path()).is_err());

@@ -361,6 +361,7 @@ mod tests {
         assert!(check_command("SWE=1 PYTHONPATH=x sh present.sh", dir.path(), &path).ok);
         assert!(check_command("python3 -c print", dir.path(), &path).ok);
         assert!(check_command("sh present.sh ...", dir.path(), &path).ok);
+        assert!(check_command("sh -c 'FOO=bar sh missing.sh'", dir.path(), &path).ok);
     }
 
     #[test]
