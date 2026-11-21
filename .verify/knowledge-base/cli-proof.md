@@ -17,3 +17,5 @@ The allowlist matches the full argv of a run, never a joined string or a prefix.
 The stop gate treats any changed file as code unless it is a doc, a proof or hook-config file, or generated output. It is not limited to Rust layouts, so a Python or JavaScript change needs a passing run too.
 
 The stop gate uses the receipt's verdict, including the review gap, so the gate and `tekmor verify receipt` cannot disagree. Evidence is scoped by project key, head SHA and code hash; the older filter that counted a run only when its log existed under `.verify/artifacts` is gone.
+
+A passing run does not prove the tests still exist, so the receipt also checks the uncommitted diff against HEAD for removed test definitions and added skip markers. A net loss makes the receipt NOT VERIFIED until a signed pass review accepts it. A skipped `it.skip(` or `xit(` still counts as a definition, so converting a test to skipped counts once as disabled, not also as removed.

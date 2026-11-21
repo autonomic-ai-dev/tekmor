@@ -166,13 +166,16 @@ fn verified_pass(root: &Path, store: &KeyStore, code_hash: &str) -> bool {
     rec.code_hash == code_hash && rec.verdict == "pass" && rec.mac == expected
 }
 
+pub fn passed(root: &Path, store: &KeyStore, code_hash: Option<&str>) -> bool {
+    code_hash.is_some_and(|hash| verified_pass(root, store, hash))
+}
+
 pub fn gap(root: &Path, store: &KeyStore, code_hash: Option<&str>) -> Option<String> {
     let risky = risky_changed(root);
     if risky.is_empty() {
         return None;
     }
-    let passed = code_hash.is_some_and(|hash| verified_pass(root, store, hash));
-    (!passed).then(|| format!("risky paths changed without an independent pass review: {}", risky.join(", ")))
+    (!passed(root, store, code_hash)).then(|| format!("risky paths changed without an independent pass review: {}", risky.join(", ")))
 }
 
 #[cfg(test)]

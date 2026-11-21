@@ -53,6 +53,9 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
 - `signed-review`: Risky paths need an independent pass review for the current tree.
   - Behaviour: `tekmor verify review` writes an HMAC-signed record; the receipt requires a valid pass record when a path in `.verify/review.toml` changed (`review.rs`). The key is in the macOS Keychain, or under the tekmor home elsewhere.
   - Outcome: A hand-written or edited record fails. Limitation: a session that can read the key can still sign.
+- `test-removal-guard`: PASSED is refused when the change removes or disables tests.
+  - Behaviour: the receipt compares removed and added lines of the diff against HEAD, plus untracked files, for test definitions and skip markers in Rust, Python, Go, JS and Java (`test_gap`, `receipt.rs`). A net removed or disabled test turns PASSED into NOT VERIFIED unless a signed pass review covers the code hash (`review::passed`).
+  - Outcome: The receipt shows a `tests:` line and the stop gate blocks with it. Limitation: only the uncommitted change against HEAD is compared, so a removal that is already committed is not caught; detection is a pattern match.
 - `flaky-detection`: Repeat runs that disagree are not proof.
   - Behaviour: `tekmor verify --repeat N -- <cmd>`. `flaky_commands` in `tekmor-core` marks a command with mixed outcomes on one tree, and the receipt ignores it, and so does the stop gate, which uses the receipt.
   - Outcome: The receipt lists the flaky command.
