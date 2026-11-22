@@ -27,6 +27,13 @@ It does not prove:
 
 Try it in about 20 seconds, without an API key: `sh examples/demo.sh`.
 
+## What has been measured
+
+- **Mechanism:** on seven SWE-bench-Live tasks, the stop gate blocked the first attempt to finish without a passing run in 10 of 14 sessions, and 7 sessions ended with the repository's tests passing through `tekmor verify`. See `harness/LIVE-PILOT.md`.
+- **Outcome:** no detectable difference yet. Control and tekmor were each accepted in 4 of 14 graded SWE-bench-Live runs, and on the regression-trap tasks the model already ran the tests unprompted, so a gate had no room (`harness/README.md`).
+- **A passing receipt is not a correct fix:** of the 7 SWE-bench-Live sessions that ended with a passing receipt, 2 were accepted by the official grader. The receipt is as strong as the command behind it.
+- **Not yet measured:** tamper resistance (no red-team set has been run) and any effect on how people review agent changes.
+
 ## Install
 
 Homebrew (macOS, Apple Silicon):
