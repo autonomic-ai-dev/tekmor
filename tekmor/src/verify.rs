@@ -1385,4 +1385,166 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
             Some(dir.path())
         ));
     }
+
+    #[test]
+    fn a_leading_assignment_is_shell_only_when_it_names_a_variable() {
+        for body in ["_A=1 pytest", "A1=1 pytest"] {
+            assert_eq!(
+                AllowEntry::parse(body).argv,
+                ["sh", "-c", body],
+                "{body}"
+            );
+        }
+        for body in ["1A=1 pytest", "A-B=1 pytest"] {
+            assert_eq!(
+                AllowEntry::parse(body).argv,
+                body.split_whitespace().collect::<Vec<_>>(),
+                "{body}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_default_step_without_a_timeout_gets_300_seconds() {
+        let dir = tempdir().unwrap();
+        write_verify_toml(
+            dir.path(),
+            "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
+        );
+        let step = load_default_step(dir.path()).unwrap().unwrap();
+        assert_eq!(step.timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn a_failing_default_step_keeps_the_tail_of_its_output() {
+        let dir = tempdir().unwrap();
+        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
+        write_verify_toml(
+            dir.path(),
+            "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"printf 'first\\nKNOWN_TAIL\\n'; exit 1\"]\n",
+        );
+        let run = run_default_step(&store, dir.path(), VerifySource::Orchestrator)
+            .unwrap()
+            .unwrap();
+        assert!(!run.report.success);
+        assert!(run.output.contains("KNOWN_TAIL"), "{:?}", run.output);
+        assert!(!run.output.trim().is_empty());
+    }
+
+    #[test]
+    fn a_failed_record_stores_the_command_as_its_cause_and_a_pass_stores_none() {
+        let dir = tempdir().unwrap();
+        let store = BrainStore::open(&dir.path().join("t.db")).unwrap();
+        let record = VerifyRecord {
+            cwd: Some(dir.path()),
+            source: VerifySource::Cli,
+        };
+        let failed = record_from_result(&store, 7, "cargo test", record).unwrap();
+        assert_eq!(failed.cause_tag.as_deref(), Some("cargo test"));
+        let passed = record_from_result(
+            &store,
+            0,
+            "cargo check",
+            VerifyRecord {
+                cwd: Some(dir.path()),
+                source: VerifySource::Cli,
+            },
+        )
+        .unwrap();
+        assert_eq!(passed.cause_tag, None);
+        let rows = store.list_verify_outcomes(10).unwrap();
+        let failed_row = rows.iter().find(|row| row.cmd == "cargo test").unwrap();
+        assert_eq!(failed_row.cause_tag.as_deref(), Some("cargo test"));
+        let passed_row = rows.iter().find(|row| row.cmd == "cargo check").unwrap();
+        assert_eq!(passed_row.cause_tag, None);
+    }
+
+    #[test]
+    fn requirements_txt_alone_selects_pytest() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("requirements.txt"), b"pytest\n").unwrap();
+        assert_eq!(default_step_for(dir.path()), Some(&["pytest"][..]));
+        let verify_path = init_verify(dir.path(), false).unwrap();
+        let toml_str = fs::read_to_string(verify_path.join("verify.toml")).unwrap();
+        assert!(toml_str.contains("commands = [\n  \"pytest\",\n"), "{toml_str}");
+        assert!(toml_str.contains("[verify.default]"), "{toml_str}");
+    }
+
+    #[test]
+    fn pytest_ini_alone_selects_pytest() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("pytest.ini"), b"[pytest]\n").unwrap();
+        assert_eq!(default_step_for(dir.path()), Some(&["pytest"][..]));
+        let verify_path = init_verify(dir.path(), false).unwrap();
+        let toml_str = fs::read_to_string(verify_path.join("verify.toml")).unwrap();
+        assert!(toml_str.contains("commands = [\n  \"pytest\",\n"), "{toml_str}");
+        assert!(toml_str.contains("[verify.default]"), "{toml_str}");
+    }
+
+    #[test]
+    fn the_artifacts_root_is_an_absolute_path_named_artifacts() {
+        let dir = artifacts_dir();
+        assert!(dir.is_absolute(), "{dir:?}");
+        assert_eq!(dir.file_name().and_then(|name| name.to_str()), Some("artifacts"));
+    }
+
+    #[test]
+    fn ignored_dirs_do_not_move_the_code_tree_hash() {
+        let dir = tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q"]);
+        fs::write(dir.path().join("a.rs"), b"fn a() {}\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "base"]);
+        let base = code_tree_hash(dir.path()).unwrap();
+
+        fs::create_dir_all(dir.path().join(".verify/knowledge-base")).unwrap();
+        fs::write(dir.path().join(".verify/knowledge-base/data.json"), b"{}").unwrap();
+        assert_eq!(code_tree_hash(dir.path()).as_deref(), Some(base.as_str()));
+
+        fs::create_dir_all(dir.path().join(".claude")).unwrap();
+        fs::write(dir.path().join(".claude/settings.json"), b"{}").unwrap();
+        assert_eq!(code_tree_hash(dir.path()).as_deref(), Some(base.as_str()));
+
+        fs::write(dir.path().join("b.rs"), b"fn b() {}\n").unwrap();
+        assert_ne!(code_tree_hash(dir.path()).as_deref(), Some(base.as_str()));
+    }
+
+    #[test]
+    fn git_head_sha_matches_rev_parse_head() {
+        let dir = tempdir().unwrap();
+        assert_eq!(git_head_sha(dir.path()), None);
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q"]);
+        fs::write(dir.path().join("a.rs"), b"fn a() {}\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "base"]);
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let expected = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert!(!expected.is_empty());
+        assert_eq!(git_head_sha(dir.path()).as_deref(), Some(expected.as_str()));
+    }
 }
