@@ -57,3 +57,28 @@ python3 harness/live-pilot/summarise.py <rollouts-dir> <graded.txt> > harness/li
 ```
 
 The rollout and grading scripts are not in the repository yet. They use local paths and need generalising before they can be committed. Until then, the summary can be regenerated from the rollout folders and the grader's verdict file, which are on the machine that ran the pilot.
+
+## Round 2: decision-log build, 2 repetitions (2026-11-22)
+
+Same seven tasks, prompt, model (`claude-haiku-5-5`), flags and grader as above. The tekmor arm ran a Linux build of `5b435c7`, the commit squash-merged into `master` as #270 (`44dd1c9`); it contains the stop-gate decision log (#269) and the shell-entry fix (#270). Two repetitions per task per arm, 28 rollouts, the four cells of a task run in parallel on one image. A watchdog stopped any rollout still running after 90 minutes. Total recorded cost $0.46.
+
+| Task | Control accepted | Tekmor accepted |
+|---|---|---|
+| aws-cloudformation__cfn-lint-3890 | 1 of 2 | 1 of 2 |
+| cyclotruc__gitingest-115 | 0 of 2 | 0 of 2 |
+| instructlab__instructlab-2592 | 0 of 2 | 0 of 2 (both stopped at 90 minutes) |
+| kedro-org__kedro-4408 | 0 of 2 (one stopped at 90 minutes) | 0 of 2 (both stopped at 90 minutes) |
+| kubernetes-client__python-2303 | 2 of 2 | 0 of 2 |
+| streamlink__streamlink-6361 | 0 of 2 | 2 of 2 |
+| yt-dlp__yt-dlp-11880 | 1 of 2 | 1 of 2 |
+
+Totals: control 4 of 14, tekmor 4 of 14. The two tasks that split the arms split in opposite directions. At two repetitions this is not evidence of an effect in either direction.
+
+What the gate did, from the decision log (`reason` on every stop event):
+- 10 of the 14 tekmor sessions first tried to end with changed code and no passing run (`check-missing`). The other 4 were stopped by the watchdog before any stop, or never reached one.
+- 7 sessions ended `verified`: the repository's own test command passed through `tekmor verify` on the final code.
+- 2 of those 7 were accepted by the grader. On kubernetes both tekmor sessions passed the repository's suite and failed the grader's FAIL_TO_PASS tests (`test_with_cluster_info`). A passing repository suite did not show that the issue was fixed, which is the limitation stated above.
+
+Found by this round and fixed before it ran: shell-style allowlist entries (quotes, `VAR=value`, `$` expansions) could not match after exact argv matching (#270). Found by this round and not yet fixed: when the last recorded run on the current code failed, the gate reported `check-missing` ("Verification is missing") instead of the failing run.
+
+Limitations: two repetitions on seven tasks; three of the seven tasks produced no accepted run in either arm; five rollouts were stopped by the 90-minute watchdog under x86-64 emulation; the host slept for about nine hours during the run, which paused but did not change any rollout.
