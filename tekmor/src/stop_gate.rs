@@ -422,10 +422,19 @@ fn evaluate_stop(
                 ),
             }
         }
-        (None, _) if code_changed && !passed => held.unwrap_or((
-            StopReason::CheckMissing,
-            missing_verification_message(root),
-        )),
+        (None, _) if code_changed && !passed => held.unwrap_or_else(|| {
+            match current
+                .as_ref()
+                .filter(|receipt| receipt.verdict == Verdict::Failed)
+                .and_then(|receipt| receipt.evidence.as_ref())
+            {
+                Some(evidence) => (StopReason::CheckFailed, failed_run_reason(evidence)),
+                None => (
+                    StopReason::CheckMissing,
+                    missing_verification_message(root),
+                ),
+            }
+        }),
         (None, gap) => gap
             .clone()
             .map(|gap| (StopReason::FeatureMapGap, gap))
@@ -467,6 +476,17 @@ fn evaluate_stop(
             reason,
         }),
     }
+}
+
+fn failed_run_reason(evidence: &crate::receipt::Evidence) -> String {
+    let mut reason = format!(
+        "Verification failed: `{}` exited with {} on the current code. Fix the failures, run `tekmor verify -- {}` again, then finish.",
+        evidence.cmd, evidence.exit_code, evidence.cmd
+    );
+    if let Some(artifact) = &evidence.artifact {
+        reason.push_str(&format!(" The output is in `{artifact}`."));
+    }
+    reason
 }
 
 fn missing_verification_message(root: &Path) -> String {
@@ -1475,5 +1495,50 @@ mod tests {
         let stop = stop_for(&repo);
         assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
         assert_eq!(stop.reason, StopReason::TestsRemoved);
+    }
+
+    #[test]
+    fn a_failed_run_on_the_current_code_is_a_check_failed_decision() -> Result<()> {
+        let repo = committed_repo("[verify]\ncommands = [\"sh -c ...\"]\n", gate_baseline());
+        write_file(repo.dir.path(), "src/b.rs", "fn b() {}");
+        verify::record_from_result(
+            &repo.store,
+            1,
+            "sh -c false",
+            verify::VerifyRecord {
+                cwd: Some(repo.dir.path()),
+                source: VerifySource::Cli,
+            },
+        )?;
+        let stop = stop_for(&repo);
+        let StopOutcome::Block(detail) = &stop.outcome else {
+            panic!("expected a block, got {stop:?}");
+        };
+        assert_eq!(stop.reason, StopReason::CheckFailed);
+        assert!(
+            detail.starts_with("Verification failed: `sh -c false` exited with 1 on the current code"),
+            "{detail}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_failed_run_from_before_the_last_edit_stays_check_missing() -> Result<()> {
+        let repo = committed_repo("[verify]\ncommands = [\"sh -c ...\"]\n", gate_baseline());
+        write_file(repo.dir.path(), "src/b.rs", "fn b() {}");
+        verify::record_from_result(
+            &repo.store,
+            1,
+            "sh -c false",
+            verify::VerifyRecord {
+                cwd: Some(repo.dir.path()),
+                source: VerifySource::Cli,
+            },
+        )?;
+        write_file(repo.dir.path(), "src/b.rs", "fn b() { let _ = 1; }");
+        let stop = stop_for(&repo);
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
+        assert_eq!(stop.reason, StopReason::CheckMissing);
+        Ok(())
     }
 }
