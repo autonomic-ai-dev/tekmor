@@ -1541,4 +1541,170 @@ mod tests {
         assert_eq!(stop.reason, StopReason::CheckMissing);
         Ok(())
     }
+
+    #[test]
+    fn a_passing_step_on_a_flaky_check_is_not_counted() -> Result<()> {
+        let mut baseline = gate_baseline();
+        baseline.push(("src/a.rs", "fn a() {}\n".to_string()));
+        let repo = committed_repo(MATRIX_VERIFY, baseline);
+        write_file(repo.dir.path(), "src/a.rs", "fn a() { let _ = 1; }");
+        write_file(
+            repo.dir.path(),
+            GATE_MAP,
+            &(feature_map(&["src/a.rs"]) + "updated\n"),
+        );
+        write_file(repo.dir.path(), GATE_KB, "# gate\nupdated\n");
+        verify::record_from_result(
+            &repo.store,
+            1,
+            "sh -c true",
+            verify::VerifyRecord {
+                cwd: Some(repo.dir.path()),
+                source: VerifySource::Cli,
+            },
+        )?;
+        let stop = stop_for(&repo);
+        assert_eq!(stop.reason, StopReason::NotCounted);
+        let StopOutcome::Block(detail) = &stop.outcome else {
+            panic!("expected a block, got {stop:?}");
+        };
+        assert_eq!(
+            detail,
+            "`sh -c true` passed, but the receipt for this code is not PASSED. Run `tekmor verify receipt` to see why, fix it, then finish."
+        );
+        Ok(())
+    }
+
+    fn claiming_transcript(dir: &Path) -> String {
+        let path = dir.join("t.jsonl");
+        fs::write(
+            &path,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"All tests pass."}]}}"#,
+        )
+        .unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn a_pass_claim_in_a_repo_without_an_allowlist_or_changes_is_ignored() {
+        let dir = TempDir::new().unwrap();
+        let aux = TempDir::new().unwrap();
+        let store = gate_store(aux.path());
+        git_in(dir.path(), &["init", "-q"]);
+        write_file(dir.path(), "a.rs", "fn a() {}\n");
+        git_in(dir.path(), &["add", "-A"]);
+        git_in(
+            dir.path(),
+            &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"],
+        );
+        assert_eq!(
+            claim_gap(&store, dir.path(), Some(&claiming_transcript(aux.path()))),
+            None
+        );
+    }
+
+    #[test]
+    fn a_pass_claim_with_an_allowlist_but_no_receipt_is_blocked() {
+        let dir = TempDir::new().unwrap();
+        let aux = TempDir::new().unwrap();
+        let store = gate_store(aux.path());
+        git_in(dir.path(), &["init", "-q"]);
+        write_file(dir.path(), ".verify/verify.toml", "[verify]\ncommands = [\"true\"]\n");
+        git_in(dir.path(), &["add", "-A"]);
+        git_in(
+            dir.path(),
+            &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"],
+        );
+        assert!(
+            claim_gap(&store, dir.path(), Some(&claiming_transcript(aux.path())))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_pass_claim_is_blocked_by_a_code_change_or_a_proof_input_change() {
+        let code_dir = TempDir::new().unwrap();
+        let aux = TempDir::new().unwrap();
+        let store = gate_store(aux.path());
+        git_in(code_dir.path(), &["init", "-q"]);
+        write_file(code_dir.path(), "a.rs", "fn a() {}\n");
+        git_in(code_dir.path(), &["add", "-A"]);
+        git_in(
+            code_dir.path(),
+            &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"],
+        );
+        write_file(code_dir.path(), "a.rs", "fn a() { let _ = 1; }\n");
+        assert!(
+            claim_gap(&store, code_dir.path(), Some(&claiming_transcript(aux.path())))
+                .is_some()
+        );
+
+        let input_dir = TempDir::new().unwrap();
+        git_in(input_dir.path(), &["init", "-q"]);
+        write_file(input_dir.path(), ".verify/run.sh", "#!/bin/sh\ntrue\n");
+        git_in(input_dir.path(), &["add", "-A"]);
+        git_in(
+            input_dir.path(),
+            &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"],
+        );
+        write_file(input_dir.path(), ".verify/run.sh", "#!/bin/sh\nfalse\n");
+        assert!(
+            claim_gap(&store, input_dir.path(), Some(&claiming_transcript(aux.path())))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn editing_only_verify_toml_still_demands_proof() {
+        let repo = committed_repo(MATRIX_VERIFY, gate_baseline());
+        write_file(
+            repo.dir.path(),
+            ".verify/verify.toml",
+            &format!("{MATRIX_VERIFY}\n"),
+        );
+        let stop = stop_for(&repo);
+        assert_eq!(stop.reason, StopReason::Verified);
+        assert!(matches!(stop.outcome, StopOutcome::Verified(_)), "{stop:?}");
+    }
+
+    #[test]
+    fn the_feature_map_index_names_markdown_but_never_readme() {
+        let dir = TempDir::new().unwrap();
+        let features = dir.path().join("features");
+        fs::create_dir_all(&features).unwrap();
+        fs::write(features.join("README.md"), b"# index").unwrap();
+        fs::write(features.join("gate.md"), b"# gate").unwrap();
+        fs::write(features.join("note.txt"), b"note").unwrap();
+        assert_eq!(markdown_names(&features), ["gate.md"]);
+    }
+
+    #[test]
+    fn the_not_counted_message_names_the_command() {
+        assert_eq!(
+            not_counted_reason("sh -c true"),
+            "`sh -c true` passed, but the receipt for this code is not PASSED. Run `tekmor verify receipt` to see why, fix it, then finish."
+        );
+    }
+
+    #[test]
+    fn a_block_event_carries_only_the_first_line_of_the_reason() {
+        let root = Path::new("/tmp/some-repo");
+        let outcome = StopOutcome::Block("line one\nline two\nline three".to_string());
+        let (kind, detail) = gate_event(&outcome, GateMode::Enforce, root);
+        assert_eq!(kind, "stop-block");
+        assert_eq!(detail, "Repo some-repo is blocked: line one");
+    }
+
+    #[test]
+    fn every_stop_reason_has_a_stable_machine_code() {
+        assert_eq!(StopReason::Verified.as_str(), "verified");
+        assert_eq!(StopReason::Clear.as_str(), "clear");
+        assert_eq!(StopReason::CheckMissing.as_str(), "check-missing");
+        assert_eq!(StopReason::CheckFailed.as_str(), "check-failed");
+        assert_eq!(StopReason::FeatureMapGap.as_str(), "feature-map-gap");
+        assert_eq!(StopReason::ReviewGap.as_str(), "review-gap");
+        assert_eq!(StopReason::TestsRemoved.as_str(), "tests-removed");
+        assert_eq!(StopReason::NotCounted.as_str(), "not-counted");
+        assert_eq!(StopReason::PassClaim.as_str(), "pass-claim");
+    }
 }
