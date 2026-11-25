@@ -968,4 +968,137 @@ mod tests {
         assert_eq!(reviewed.test_gap, None);
         Ok(())
     }
+
+    #[test]
+    fn a_failing_run_for_this_tree_marks_the_requirement_failed() {
+        let specs = [spec(
+            "login",
+            "R1. Users log in. check: `cargo test login`\n",
+        )];
+        let rows = [row(
+            "cargo test login",
+            1,
+            Some(HEAD),
+            Some(HASH),
+            Some("cli"),
+        )];
+        assert_eq!(
+            states(&specs, &rows, &["cargo test login"]),
+            [RequirementState::Failed]
+        );
+    }
+
+    #[test]
+    fn spec_files_on_disk_feed_the_receipt_and_only_markdown_counts() -> Result<()> {
+        let dir = committed(&[
+            ("src/lib.rs", "fn a() {}\n"),
+            (".verify/verify.toml", "[verify]\ncommands = [\"sh -c ...\"]\n"),
+            (
+                ".verify/specs/login.md",
+                "R1. Users log in. check: `sh -c true`\nR2. Passwords hash.\n",
+            ),
+            (".verify/specs/notes.txt", "R1. Not a spec. check: `sh -c true`\n"),
+        ])?;
+        let aux = tempfile::TempDir::new()?;
+        let store = BrainStore::open(&aux.path().join("t.db"))?;
+        let keys = crate::review::KeyStore::File(aux.path().join("review.key"));
+        let receipt = receipt_with_keys(&store, dir.path(), &keys)?;
+        let ids: Vec<&str> = receipt
+            .requirements
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+        assert_eq!(ids, ["login/R1", "login/R2"]);
+        assert!(render_text(&receipt).contains("requirements: 0 of 2 proven"));
+        Ok(())
+    }
+
+    #[test]
+    fn removing_two_tests_says_two_tests() -> Result<()> {
+        let dir = committed(&[(
+            "src/lib.rs",
+            "fn a() {}\n\n#[test]\nfn checks_a() {}\n\n#[test]\nfn checks_b() {}\n",
+        )])?;
+        put(dir.path(), "src/lib.rs", "fn a() {}\n")?;
+        let gap = test_gap(dir.path()).ok_or_else(|| anyhow::anyhow!("expected a gap"))?;
+        assert_eq!(
+            gap,
+            "the change removes 2 tests compared to HEAD (src/lib.rs); record an independent pass review to accept it"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_gap_names_only_the_kind_of_test_change_that_happened() -> Result<()> {
+        let dir = committed(&[("src/lib.rs", RUST_TEST)])?;
+        put(dir.path(), "src/lib.rs", "fn a() {}\n")?;
+        assert_eq!(
+            test_gap(dir.path()),
+            Some(
+                "the change removes 1 test compared to HEAD (src/lib.rs); record an independent pass review to accept it"
+                    .to_string()
+            )
+        );
+        git(dir.path(), &["add", "-A"])?;
+        git(dir.path(), &["commit", "-qm", "clean"])?;
+        put(
+            dir.path(),
+            "src/lib.rs",
+            "fn a() {}\n\n#[test]\n#[ignore]\nfn checks_a() {}\n",
+        )?;
+        let gap = test_gap(dir.path()).ok_or_else(|| anyhow::anyhow!("expected a gap"))?;
+        assert_eq!(
+            gap,
+            "the change disables 1 test compared to HEAD (src/lib.rs); record an independent pass review to accept it"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_recorded_time_is_rendered_as_rfc3339() {
+        assert_eq!(recorded_at_text(0), "1970-01-01T00:00:00Z");
+        assert_eq!(
+            recorded_at_text(1_794_000_000_000),
+            "2026-11-06T21:20:00Z"
+        );
+        let rows = [row("cargo test", 0, Some(HEAD), Some(HASH), Some("cli"))];
+        let receipt = build_receipt(&rows, Some(HEAD), Some(HASH));
+        assert!(render_text(&receipt).contains("recorded:  2026-11-06T21:20:00Z"));
+        assert!(render_markdown(&receipt).contains("| Recorded | 2026-11-06T21:20:00Z |"));
+    }
+
+    #[test]
+    fn protected_changes_are_listed_when_present_and_hidden_when_absent() {
+        let rows = [row("cargo test", 0, Some(HEAD), Some(HASH), Some("cli"))];
+        let mut receipt = build_receipt(&rows, Some(HEAD), Some(HASH));
+        receipt.protected_changes = vec![".verify/verify.toml".to_string()];
+        assert!(
+            render_text(&receipt)
+                .contains("  checks changed since last commit: .verify/verify.toml\n")
+        );
+        assert!(
+            render_markdown(&receipt)
+                .contains("**Checks changed since last commit:** .verify/verify.toml\n")
+        );
+        receipt.protected_changes.clear();
+        assert!(!render_text(&receipt).contains("checks changed"));
+        assert!(!render_markdown(&receipt).contains("Checks changed"));
+    }
+
+    #[test]
+    fn the_proven_count_counts_only_proven_requirements() {
+        let specs = [spec(
+            "login",
+            "R1. A. check: `cargo test a`\nR2. B. check: `cargo test b`\nR3. C.\n",
+        )];
+        let rows = [
+            row("cargo test a", 0, Some(HEAD), Some(HASH), Some("cli")),
+            row("cargo test b", 0, Some(HEAD), Some(HASH), Some("cli")),
+        ];
+        let mut receipt = build_receipt(&rows, Some(HEAD), Some(HASH));
+        receipt.requirements =
+            requirement_states(&specs, &rows, Some(HEAD), Some(HASH), |_| true);
+        assert!(render_text(&receipt).contains("  requirements: 2 of 3 proven\n"));
+        assert!(render_markdown(&receipt).contains("**Requirements: 2 of 3 proven**"));
+    }
 }
