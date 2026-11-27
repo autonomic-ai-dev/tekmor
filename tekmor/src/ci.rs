@@ -30,6 +30,8 @@ pub struct CiReport {
     pub changed_checks: Vec<String>,
     pub gaps: Vec<String>,
     pub approved_by: Option<String>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub failure_output: String,
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<()> {
@@ -95,7 +97,6 @@ impl<'a> BaseChecks<'a> {
             args.extend(checks.base_files.iter().map(String::as_str));
             git(root, &args)?;
         }
-        std::env::set_var("TEKMOR_BASE", merge_base);
         Ok(checks)
     }
 
@@ -144,6 +145,7 @@ pub fn run(store: &BrainStore, root: &Path, keys: &KeyStore, base_ref: &str, app
 
     let mut base_checks = BaseChecks::apply(root, &merge_base)?;
     let run = verify::run_default_step(store, root, VerifySource::Ci)?;
+    std::env::set_var("TEKMOR_BASE", &merge_base);
     let receipt = receipt::receipt_with_keys(store, root, keys)?;
     base_checks.restore()?;
 
@@ -179,6 +181,10 @@ pub fn run(store: &BrainStore, root: &Path, keys: &KeyStore, base_ref: &str, app
         changed_checks,
         gaps,
         approved_by: approved_by.map(str::to_string),
+        failure_output: match (&run, verdict) {
+            (Some(step), CiVerdict::Failed) => step.output.trim_end().to_string(),
+            _ => String::new(),
+        },
     })
 }
 
@@ -209,6 +215,9 @@ pub fn render_markdown(report: &CiReport) -> String {
         out.push_str(&format!("\n- {gap}"));
     }
     out.push('\n');
+    if !report.failure_output.is_empty() {
+        out.push_str(&format!("\n<details><summary>Suite output (tail)</summary>\n\n```\n{}\n```\n\n</details>\n", report.failure_output));
+    }
     out
 }
 
@@ -223,6 +232,9 @@ pub fn render_text(report: &CiReport) -> String {
     for gap in &report.gaps {
         out.push_str(&format!("  - {gap}\n"));
     }
+    if !report.failure_output.is_empty() {
+        out.push_str(&format!("--- suite output (tail) ---\n{}\n", report.failure_output));
+    }
     out
 }
 
@@ -231,7 +243,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    const PASSING_SUITE: &str = "#!/bin/sh\ngrep -q 'fn good' src/lib.rs\n";
+    const PASSING_SUITE: &str = "#!/bin/sh\n[ -z \"$TEKMOR_BASE\" ] || { echo 'TEKMOR_BASE leaked into the suite'; exit 1; }\ngrep -q 'fn good' src/lib.rs || { echo 'fn good is missing'; exit 1; }\n";
 
     fn sh(root: &Path, args: &[&str]) {
         let status = Command::new("git")
@@ -371,7 +383,9 @@ mod tests {
         let fx = Fixture::new();
         put(fx.root(), "src/lib.rs", "fn bad() {}\n#[test]\nfn keeps() {}\n");
         commit(fx.root(), "break it");
-        assert_eq!(fx.ci(None).verdict, CiVerdict::Failed);
+        let report = fx.ci(None);
+        assert_eq!(report.verdict, CiVerdict::Failed);
+        assert!(render_text(&report).contains("suite output"), "{report:?}");
     }
 
     #[test]

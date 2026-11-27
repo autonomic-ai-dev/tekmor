@@ -98,7 +98,7 @@ jobs:
       - uses: autonomic-ai-dev/tekmor@<release-tag>
 ```
 
-Make that job a required check in branch protection. Limits: the pull request's code still runs, with a read-only token and no secrets, and the action installs tekmor with `cargo install`. This repository runs the same steps in `.github/workflows/merge-proof.yml`, with tekmor built from the base branch.
+Make that job a required check in branch protection. Limits: the pull request's code still runs, with a read-only token and no secrets, and the action installs tekmor with `cargo install`. Approval releases HELD, not FAILED: a pull request whose code fails the base branch's suite on purpose (for example, it renames a test file that `run.sh` names) has to be merged with an override, then the next pull request runs the new checks. This repository runs the same steps in `.github/workflows/merge-proof.yml`, with tekmor built from the base branch.
 
 ## Layout
 
