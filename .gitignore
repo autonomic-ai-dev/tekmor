@@ -13,3 +13,4 @@ target/
 vectors.bin
 .tekmor_test/
 __pycache__/
+CLAUDE.local.md

@@ -18,6 +18,8 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
   - Outcome: The recorded run is what the receipt and the stop gate read.
 - `receipt`: Shows whether the current commit and code passed.
   - Behaviour: `tekmor verify receipt [--markdown|--json]` builds a receipt from recorded runs for the current head and code hash (`receipt.rs`). Exit code is 0 only when the verdict is Passed.
+  - Behaviour (suite): a non-flaky failing run on the current tree makes the verdict FAILED. When `[verify.default]` is configured, its command must have passed on the current tree, otherwise the verdict is NOT VERIFIED with a `suite:` line. Without a default, a lone passing command still counts (`suite_gap`, `receipt.rs`).
+  - Behaviour (checks changed): a tracked change to `.verify/verify.toml`, `run.sh` or `checks/` holds PASSED until a pass review covers the tree. Untracked files are ignored.
   - Outcome: One verdict, used by the CLI, the stop gate and CI.
 - `check-summary`: Per check, how often it failed.
   - Behaviour: `tekmor verify summary [--json]` groups recent runs by command, failing checks first (`tekmor-core` `evidence::summarize`).
@@ -26,7 +28,7 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
   - Behaviour: `tekmor stop-gate` (`stop_gate.rs`), registered as the Claude Code Stop hook. Changed code is any changed file except docs (`.md`, `.rst`), files under `.verify/` or `.claude/`, `.git`, and generated caches (`__pycache__`, `.pytest_cache`, `.mypy_cache`, `node_modules`, `target`, `*.pyc`). The rule is language-agnostic (`is_code_path`, `verify.rs`). The gate takes its verdict from the receipt (`receipt::receipt_with_keys`), including the review gap; a passing run held back by a missing review blocks with the review command and the default step is not run again. When changed code has no passing run, the block asks for the check first; a feature-map gap is reported once the check passes. When the latest run on the current code failed, the block names the failing command and its exit code (`check-failed`) rather than reporting a missing check.
   - Outcome: The block names the repo and the missing feature map or check.
 - `bash-gate`: Blocks or warns on risky shell commands before they run.
-  - Behaviour: `tekmor bash-gate` (`command_policy.rs`, `command_rules.rs`). It also refuses commits that skip git hooks (`commit_gate.rs`).
+  - Behaviour: `tekmor bash-gate` (`command_policy.rs`, `command_rules.rs`). It also refuses commits that skip git hooks (`commit_gate.rs`), and refuses any command containing `verify review`, so the agent cannot sign a review.
   - Outcome: Registered as the Claude Code PreToolUse hook for Bash.
 - `feature-map-gap`: Names the feature map that owns changed code.
   - Behaviour: `feature_map.rs` reads `.verify/features` and the `## Code` section of each map.
@@ -94,6 +96,7 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
 - `tekmor/src/review.rs`
 - `tekmor/src/claims.rs`
 - `tekmor/src/lib.rs`
+- `tekmor/tests/verify_layout.rs`
 
 ## How to get to it (user POV)
 

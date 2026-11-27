@@ -67,6 +67,30 @@ pub struct Receipt {
     pub review_gap: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test_gap: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suite_gap: Option<String>,
+}
+
+fn suite_gap(rows: &[EvidenceRecord], head: &str, hash: &str, default_cmd: Option<&str>) -> Option<(Verdict, String)> {
+    let flaky = flaky_commands(rows, head, hash);
+    let mut failed: Vec<&str> = rows
+        .iter()
+        .filter(|row| row.is_run_for(head, hash) && row.exit_code != 0 && !flaky.contains(&row.cmd))
+        .map(|row| row.cmd.as_str())
+        .collect();
+    failed.sort_unstable();
+    failed.dedup();
+    if !failed.is_empty() {
+        return Some((Verdict::Failed, format!("failed on this tree: {}", failed.join(", "))));
+    }
+    let cmd = default_cmd?;
+    let ran = rows.iter().any(|row| row.is_run_for(head, hash) && row.cmd == cmd && !flaky.contains(&row.cmd));
+    (!ran).then(|| {
+        (
+            Verdict::NotVerified,
+            format!("the default suite `{cmd}` has not run on this tree; run `tekmor verify -- {cmd}`"),
+        )
+    })
 }
 
 pub fn build_receipt(
@@ -102,6 +126,7 @@ pub fn build_receipt(
         flaky,
         review_gap: None,
         test_gap: None,
+        suite_gap: None,
     }
 }
 
@@ -163,6 +188,7 @@ fn protected_changes(root: &Path) -> Vec<String> {
         .map(|output| {
             String::from_utf8_lossy(&output.stdout)
                 .lines()
+                .filter(|line| !line.starts_with("??"))
                 .filter_map(|line| line.get(3..))
                 .map(str::to_string)
                 .collect()
@@ -304,6 +330,13 @@ pub fn receipt_with_keys(store: &BrainStore, root: &Path, keys: &crate::review::
         None => Vec::new(),
     };
     let mut receipt = build_receipt(&rows, head.as_deref(), code.as_deref());
+    let default_cmd = verify::load_default_step(root)?.map(|step| verify::render_argv(&step.command));
+    if let (Some(head), Some(hash)) = (head.as_deref(), code.as_deref()) {
+        if let Some((verdict, gap)) = suite_gap(&rows, head, hash, default_cmd.as_deref()) {
+            receipt.verdict = verdict;
+            receipt.suite_gap = Some(gap);
+        }
+    }
     if let Some(gap) = crate::review::gap(root, keys, code.as_deref()) {
         receipt.verdict = Verdict::NotVerified;
         receipt.review_gap = Some(gap);
@@ -321,6 +354,13 @@ pub fn receipt_with_keys(store: &BrainStore, root: &Path, keys: &crate::review::
         |cmd| verify::command_text_is_allowlisted(cmd, Some(root)),
     );
     receipt.protected_changes = protected_changes(root);
+    if receipt.verdict == Verdict::Passed && !receipt.protected_changes.is_empty() && !crate::review::passed(root, keys, code.as_deref()) {
+        receipt.verdict = Verdict::NotVerified;
+        receipt.suite_gap = Some(format!(
+            "checks changed since last commit ({}); a pass review for this tree is needed",
+            receipt.protected_changes.join(", ")
+        ));
+    }
     if let Some(evidence) = receipt.evidence.as_mut() {
         let artifact = verify::repo_artifact_path(root, &evidence.id);
         if artifact.is_file() {
@@ -385,6 +425,9 @@ pub fn render_text(receipt: &Receipt) -> String {
     }
     if let Some(gap) = &receipt.test_gap {
         out.push_str(&format!("  tests:     {gap}\n"));
+    }
+    if let Some(gap) = &receipt.suite_gap {
+        out.push_str(&format!("  suite:     {gap}\n"));
     }
     if !receipt.protected_changes.is_empty() {
         out.push_str(&format!(
@@ -491,6 +534,9 @@ pub fn render_markdown(receipt: &Receipt) -> String {
     }
     if let Some(gap) = &receipt.test_gap {
         out.push_str(&format!("\n**Tests:** {gap}\n"));
+    }
+    if let Some(gap) = &receipt.suite_gap {
+        out.push_str(&format!("\n**Suite:** {gap}\n"));
     }
     if !receipt.protected_changes.is_empty() {
         out.push_str(&format!(
@@ -967,6 +1013,46 @@ mod tests {
         assert_eq!(reviewed.verdict, Verdict::Passed);
         assert_eq!(reviewed.test_gap, None);
         Ok(())
+    }
+
+    #[test]
+    fn a_passing_command_cannot_stand_in_for_a_configured_suite() {
+        let rows = [row("true", 0, Some(HEAD), Some(HASH), Some("cli"))];
+        let (verdict, gap) = suite_gap(&rows, HEAD, HASH, Some("sh .verify/run.sh")).expect("a gap");
+        assert_eq!(verdict, Verdict::NotVerified);
+        assert!(gap.contains("sh .verify/run.sh"), "{gap}");
+    }
+
+    #[test]
+    fn a_later_pass_does_not_hide_a_failing_run_on_the_same_tree() {
+        let rows = [
+            row("true", 0, Some(HEAD), Some(HASH), Some("cli")),
+            row("sh .verify/full.sh", 1, Some(HEAD), Some(HASH), Some("cli")),
+        ];
+        let (verdict, gap) = suite_gap(&rows, HEAD, HASH, None).expect("a gap");
+        assert_eq!(verdict, Verdict::Failed);
+        assert!(gap.contains("sh .verify/full.sh"), "{gap}");
+    }
+
+    #[test]
+    fn a_failure_that_was_rerun_to_pass_is_flaky_not_failed() {
+        let rows = [
+            row("cargo test", 0, Some(HEAD), Some(HASH), Some("cli")),
+            row("cargo test", 1, Some(HEAD), Some(HASH), Some("cli")),
+        ];
+        assert_eq!(suite_gap(&rows, HEAD, HASH, None), None);
+    }
+
+    #[test]
+    fn a_configured_suite_that_passed_on_this_tree_is_no_gap() {
+        let rows = [row("sh .verify/run.sh", 0, Some(HEAD), Some(HASH), Some("cli"))];
+        assert_eq!(suite_gap(&rows, HEAD, HASH, Some("sh .verify/run.sh")), None);
+    }
+
+    #[test]
+    fn a_suite_run_on_another_tree_does_not_count() {
+        let rows = [row("sh .verify/run.sh", 0, Some(HEAD), Some("other"), Some("cli"))];
+        assert!(suite_gap(&rows, HEAD, HASH, Some("sh .verify/run.sh")).is_some());
     }
 
     #[test]
