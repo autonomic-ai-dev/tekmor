@@ -104,3 +104,14 @@ fn every_stop_decision_is_logged_with_a_reason_code() {
         "{block}"
     );
 }
+
+#[test]
+fn an_unreadable_run_store_blocks_the_turn_instead_of_ending_it() {
+    let home = TempDir::new().expect("temp tekmor home");
+    fs::write(home.path().join("data"), "not a directory").expect("plant a file where the store directory goes");
+    let repo = TempDir::new().expect("temp repo");
+    git(repo.path(), &["init", "-q"]);
+    let out = run_stop_gate(home.path(), repo.path(), "s-store");
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("run store"), "{out:?}");
+}

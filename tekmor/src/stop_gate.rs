@@ -26,6 +26,8 @@ pub struct StopInput {
     pub cwd: Option<String>,
     pub session_id: Option<String>,
     pub transcript_path: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -245,9 +247,15 @@ pub fn run_session_start() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     if let Some(root) = git_root(&cwd) {
-        verify::record_session_base(&root)?;
+        if starts_a_new_base(input.source.as_deref(), verify::session_base(&root).is_some()) {
+            verify::record_session_base(&root)?;
+        }
     }
     Ok(())
+}
+
+pub fn starts_a_new_base(source: Option<&str>, has_valid_base: bool) -> bool {
+    matches!(source, None | Some("startup")) || !has_valid_base
 }
 
 pub fn run_stop_gate() -> Result<()> {
@@ -261,8 +269,15 @@ pub fn run_stop_gate() -> Result<()> {
         .cwd
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let config = Config::load()?;
-    let store = BrainStore::open(&config.db_path)?;
+    let config = Config::load().unwrap_or_else(|err| {
+        hook_blocked(&format!("tekmor could not load its config ({err:#}); the turn is blocked until the gate can read it"))
+    });
+    let store = BrainStore::open(&config.db_path).unwrap_or_else(|err| {
+        hook_blocked(&format!(
+            "tekmor could not open its run store at {} ({err:#}); the turn is blocked until the gate can read it",
+            config.db_path.display()
+        ))
+    });
     let state_file = config.db_path.with_file_name(STATE_FILE);
     let session_id = input.session_id.unwrap_or_default();
     let Some(root) = git_root(&cwd) else {
@@ -401,7 +416,8 @@ fn evaluate_stop(
         });
     }
     let blocks = prior_blocks(&load_state(state_file), session_id, edit);
-    let step = if code_changed && !passed && held.is_none() {
+    let runs_in_hook = verify::load_default_step(root)?.is_some_and(|step| step.hook);
+    let step = if code_changed && !passed && held.is_none() && runs_in_hook {
         verify::run_default_step(store, root, VerifySource::Cli)?
     } else {
         None
@@ -1459,6 +1475,16 @@ mod tests {
     }
 
     #[test]
+    fn a_suite_marked_hook_false_is_not_run_by_the_stop_gate_but_still_required() {
+        let verify = "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"exit 1\"]\nhook = false\n";
+        let repo = committed_repo(verify, gate_baseline());
+        write_file(repo.dir.path(), "src/b.rs", "fn b() {}");
+        let stop = stop_for(&repo);
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
+        assert_eq!(stop.reason, StopReason::CheckMissing, "{stop:?}");
+    }
+
+    #[test]
     fn a_failing_default_step_is_a_check_failed_decision() {
         let repo = committed_repo(MATRIX_FAILING_VERIFY, gate_baseline());
         write_file(repo.dir.path(), "src/b.rs", "fn b() {}");
@@ -1673,6 +1699,16 @@ mod tests {
         let stop = stop_for(&repo);
         assert_eq!(stop.reason, StopReason::CheckFailed, "{stop:?}");
         assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
+    }
+
+    #[test]
+    fn resume_clear_and_compact_keep_the_base_that_startup_recorded() {
+        for source in ["resume", "clear", "compact"] {
+            assert!(!starts_a_new_base(Some(source), true), "{source} must not move a valid base");
+            assert!(starts_a_new_base(Some(source), false), "{source} records a base when none is valid");
+        }
+        assert!(starts_a_new_base(Some("startup"), true));
+        assert!(starts_a_new_base(None, true));
     }
 
     #[test]

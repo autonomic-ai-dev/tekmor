@@ -174,6 +174,7 @@ pub struct DefaultStep {
 
 pub const TIMEOUT_EXIT_CODE: i32 = 124;
 pub const MAX_STEP_TIMEOUT_SECS: u64 = 600;
+pub const MAX_CI_STEP_TIMEOUT_SECS: u64 = 6 * 60 * 60;
 const VERIFY_RUN_TIMEOUT: Duration = Duration::from_secs(900);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -190,8 +191,10 @@ pub fn load_default_step(project_root: &Path) -> Result<Option<DefaultStep>> {
         if step.command.is_empty() {
             bail!("[verify.default] command is empty in {rel}");
         }
-        if !(1..=MAX_STEP_TIMEOUT_SECS).contains(&step.timeout_secs) {
-            bail!("[verify.default] timeout_secs must be between 1 and {MAX_STEP_TIMEOUT_SECS} in {rel}");
+        let limit = if step.hook { MAX_STEP_TIMEOUT_SECS } else { MAX_CI_STEP_TIMEOUT_SECS };
+        if !(1..=limit).contains(&step.timeout_secs) {
+            let scope = if step.hook { " while hook = true (the stop gate runs it); set hook = false for longer suites" } else { "" };
+            bail!("[verify.default] timeout_secs must be between 1 and {limit}{scope} in {rel}");
         }
         return Ok(Some(DefaultStep {
             command: step.command,
@@ -499,13 +502,27 @@ pub fn record_from_result(
     })
 }
 
+fn node_test_command(project_root: &Path) -> Option<&'static [&'static str]> {
+    if project_root.join("pnpm-lock.yaml").exists() {
+        Some(&["pnpm", "test"])
+    } else if project_root.join("yarn.lock").exists() {
+        Some(&["yarn", "test"])
+    } else if project_root.join("bun.lockb").exists() {
+        Some(&["bun", "test"])
+    } else if project_root.join("package.json").exists() {
+        Some(&["npm", "test"])
+    } else {
+        None
+    }
+}
+
 /// Initialize `.verify/` in `project_root` with `verify.toml`, `run.sh`, and `README.md`.
 fn default_step_for(project_root: &Path) -> Option<&'static [&'static str]> {
     if project_root.join("Cargo.toml").exists() {
         return Some(&["cargo", "test"]);
     }
-    if project_root.join("package.json").exists() {
-        return Some(&["npm", "test"]);
+    if let Some(argv) = node_test_command(project_root) {
+        return Some(argv);
     }
     if project_root.join("pyproject.toml").exists()
         || project_root.join("requirements.txt").exists()
@@ -535,18 +552,7 @@ pub fn init_verify(project_root: &Path, force: bool) -> Result<PathBuf> {
             commands.push("cargo clippy".to_string());
             commands.push("cargo check".to_string());
         }
-        let node_runner = if project_root.join("pnpm-lock.yaml").exists() {
-            Some("pnpm test")
-        } else if project_root.join("yarn.lock").exists() {
-            Some("yarn test")
-        } else if project_root.join("bun.lockb").exists() {
-            Some("bun test")
-        } else if project_root.join("package.json").exists() {
-            Some("npm test")
-        } else {
-            None
-        };
-        commands.extend(node_runner.map(str::to_string));
+        commands.extend(node_test_command(project_root).map(|argv| argv.join(" ")));
         if fs::read_to_string(project_root.join("Gemfile")).is_ok_and(|text| text.contains("rspec"))
         {
             commands.push("bundle exec rspec".to_string());
@@ -1348,6 +1354,20 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
     }
 
     #[test]
+    fn a_suite_the_stop_gate_runs_is_capped_but_a_ci_only_suite_may_run_for_hours() {
+        let dir = tempdir().unwrap();
+        write_verify_toml(dir.path(), "[verify.default]\ncommand = [\"make\", \"test\"]\ntimeout_secs = 3600\n");
+        let err = load_default_step(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("hook = false"), "{err}");
+        write_verify_toml(dir.path(), "[verify.default]\ncommand = [\"make\", \"test\"]\ntimeout_secs = 3600\nhook = false\n");
+        let step = load_default_step(dir.path()).unwrap().unwrap();
+        assert_eq!(step.timeout, Duration::from_secs(3600));
+        assert!(!step.hook);
+        write_verify_toml(dir.path(), "[verify.default]\ncommand = [\"make\", \"test\"]\ntimeout_secs = 30000\nhook = false\n");
+        assert!(load_default_step(dir.path()).is_err());
+    }
+
+    #[test]
     fn default_step_rejects_invalid_toml_instead_of_skipping_it() {
         let dir = tempdir().unwrap();
         write_verify_toml(dir.path(), "[verify.default\ncommand = ");
@@ -1542,6 +1562,19 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
         let toml_str = fs::read_to_string(verify_path.join("verify.toml")).unwrap();
         assert!(toml_str.contains("commands = [\n  \"pytest\",\n"), "{toml_str}");
         assert!(toml_str.contains("[verify.default]"), "{toml_str}");
+    }
+
+    #[test]
+    fn the_default_init_writes_is_always_in_the_allowlist_it_writes() {
+        for (lockfile, runner) in [("pnpm-lock.yaml", "pnpm"), ("yarn.lock", "yarn"), ("bun.lockb", "bun"), ("package-lock.json", "npm")] {
+            let dir = tempdir().unwrap();
+            fs::write(dir.path().join("package.json"), b"{}").unwrap();
+            fs::write(dir.path().join(lockfile), b"").unwrap();
+            init_verify(dir.path(), false).unwrap();
+            let step = load_default_step(dir.path()).unwrap().unwrap();
+            assert_eq!(step.command, vec![runner, "test"], "{lockfile}");
+            assert!(command_is_allowlisted(&step.command, Some(dir.path())), "{lockfile}: default not allowlisted");
+        }
     }
 
     #[test]

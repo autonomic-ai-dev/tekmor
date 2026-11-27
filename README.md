@@ -77,12 +77,13 @@ A `commands` entry must match the run's argv exactly (a trailing `...` allows ex
 
 A CI job that runs the pull request's own checks proves nothing: the pull request can rewrite them. `tekmor ci --base <REF>` runs the checks of the branch being merged into against the pull request's commit.
 
-- Every check file (all of `.verify/` except `artifacts/`, `features/`, `knowledge-base/` and Markdown) is swapped for its merge-base version during the run, and `[verify.default]` comes from the merge-base. The base must declare one.
+- Every check file (all of `.verify/` except `artifacts/`, `features/`, `knowledge-base/` and Markdown) is swapped for its merge-base version during the run, and `[verify.default]` comes from the merge-base.
 - The test-removal guard and risky paths compare against the merge-base, so committed changes count.
 - A pull request that edits check files, removes tests or touches risky paths is HELD until a maintainer approves that exact head commit. Re-run the job after approving.
-- Exit 0 only for PASSED.
+- The pull request that first adds tekmor (the base has no `[verify.default]` yet) runs its own suite and is HELD until approved.
+- Exit 0 only for PASSED. A FAILED report carries the tail of the suite's output.
 
-The workflow must run on `pull_request_target`, so it comes from the base branch and the pull request cannot edit it. Install your toolchain first, then add the action:
+The workflow must run on `pull_request_target`, so it comes from the base branch and the pull request cannot edit it. Install your toolchain first, then add the action. The second job keeps one comment on the pull request up to date with the report; it never checks out the pull request's code, so the job that does holds no write token:
 
 ```yaml
 on:
@@ -90,15 +91,43 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 permissions:
   contents: read
-  pull-requests: read
 jobs:
   merge-proof:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
-      - uses: autonomic-ai-dev/tekmor@<release-tag>
+      - uses: autonomic-ai-dev/tekmor@v2.1.0
+  comment:
+    needs: merge-proof
+    if: always() && needs.merge-proof.result != 'skipped' && needs.merge-proof.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: autonomic-ai-dev/tekmor/comment@v2.1.0
+        with:
+          result: ${{ needs.merge-proof.result }}
 ```
 
-Make that job a required check in branch protection. Limits: the pull request's code still runs, with a read-only token and no secrets, and the action installs tekmor with `cargo install`. Approval releases HELD, not FAILED: a pull request whose code fails the base branch's suite on purpose (for example, it renames a test file that `run.sh` names) has to be merged with an override, then the next pull request runs the new checks. This repository runs the same steps in `.github/workflows/merge-proof.yml`, with tekmor built from the base branch.
+Make the `merge-proof` job a required check in branch protection. The comment's headline comes from the job's result; the report under it is the run's own output. A suite longer than 10 minutes needs `hook = false` in `[verify.default]` (then the stop gate asks for a run instead of running it) and may set `timeout_secs` up to 21600. Limits: the pull request's code still runs, with a read-only token and no secrets, and the action builds tekmor from its own ref with `cargo install` (set `version` to install from crates.io instead). Approval releases HELD, not FAILED: a pull request whose code fails the base branch's suite on purpose (for example, it renames a test file that `run.sh` names) has to be merged with an override, then the next pull request runs the new checks. This repository runs the same steps in `.github/workflows/merge-proof.yml`, with tekmor built from the base branch.
+
+### Run agents under their own GitHub identity
+
+An approval only means something if the agent cannot make it. When an agent pushes and opens pull requests with a maintainer's token, it can also approve or comment as that maintainer. Give agents their own identity:
+
+1. Create a machine user (a separate GitHub account) or a GitHub App for agents, and give it write access to the repository. For a machine user, create a fine-grained token limited to this repository with Contents, Pull requests and Workflows set to read and write.
+2. Point the agent at that identity only: set `GH_TOKEN` to the agent's token in the agent's environment, set `user.name` and `user.email` in the repository to the agent's noreply address, and use a credential helper that returns the agent's token for `git push`.
+3. Set `approvers` on the action to the humans whose approval counts. Without it, any collaborator's approval counts, including the agent's, so an agent could push to a human's pull request and approve it.
+
+```yaml
+      - uses: autonomic-ai-dev/tekmor@v2.1.0
+        with:
+          approvers: alice,bob
+```
+
+The agent then authors its pull requests, a listed human approves the head commit, and a re-run of the job releases HELD. An agent running as the same operating-system user as the maintainer can still reach the maintainer's stored credentials; full separation needs the agent in a container, a VM or a hosted runner where only its own token exists.
 
 ## Layout
 

@@ -75,7 +75,6 @@ struct BaseChecks<'a> {
     root: &'a Path,
     head_files: BTreeSet<String>,
     base_files: BTreeSet<String>,
-    previous_base: Option<String>,
     restored: bool,
 }
 
@@ -85,7 +84,6 @@ impl<'a> BaseChecks<'a> {
         let base_files = proof_files(root, merge_base)?;
         let checks = Self {
             root,
-            previous_base: std::env::var("TEKMOR_BASE").ok(),
             head_files,
             base_files,
             restored: false,
@@ -105,10 +103,6 @@ impl<'a> BaseChecks<'a> {
             return Ok(());
         }
         self.restored = true;
-        match &self.previous_base {
-            Some(value) => std::env::set_var("TEKMOR_BASE", value),
-            None => std::env::remove_var("TEKMOR_BASE"),
-        }
         remove_all(self.root, self.base_files.difference(&self.head_files))?;
         checkout(self.root, "HEAD", &self.head_files)
     }
@@ -144,13 +138,25 @@ pub fn run(store: &BrainStore, root: &Path, keys: &KeyStore, base_ref: &str, app
         .unwrap_or_default();
 
     let mut base_checks = BaseChecks::apply(root, &merge_base)?;
+    let bootstrap = verify::load_default_step(root)?.is_none() && {
+        base_checks.restore()?;
+        verify::load_default_step(root)?.is_some()
+    };
     let run = verify::run_default_step(store, root, VerifySource::Ci)?;
+    let previous_base = std::env::var("TEKMOR_BASE").ok();
     std::env::set_var("TEKMOR_BASE", &merge_base);
-    let receipt = receipt::receipt_with_keys(store, root, keys)?;
+    let receipt = receipt::receipt_with_keys(store, root, keys);
+    match previous_base {
+        Some(value) => std::env::set_var("TEKMOR_BASE", value),
+        None => std::env::remove_var("TEKMOR_BASE"),
+    }
+    let receipt = receipt?;
     base_checks.restore()?;
 
     let mut gaps = Vec::new();
-    if !changed_checks.is_empty() {
+    if bootstrap {
+        gaps.push("the base branch has no [verify.default] yet; this change adds one, so its own suite ran, and a maintainer must approve this head".into());
+    } else if !changed_checks.is_empty() {
         gaps.push(format!(
             "this change edits check files ({}); the base branch's versions ran instead, and a maintainer must approve this head",
             changed_checks.join(", ")
@@ -159,7 +165,7 @@ pub fn run(store: &BrainStore, root: &Path, keys: &KeyStore, base_ref: &str, app
     let review_gaps: Vec<String> = [receipt.review_gap.clone(), receipt.test_gap.clone()].into_iter().flatten().collect();
     gaps.extend(review_gaps.iter().cloned());
     gaps.extend(receipt.suite_gap.clone());
-    let needs_approval = !changed_checks.is_empty() || !review_gaps.is_empty();
+    let needs_approval = bootstrap || !changed_checks.is_empty() || !review_gaps.is_empty();
     let suite_proven = receipt.suite_gap.is_none() && (receipt.verdict == Verdict::Passed || (receipt.verdict == Verdict::NotVerified && !review_gaps.is_empty()));
     let verdict = match &run {
         None => {
@@ -396,6 +402,27 @@ mod tests {
         let keys = KeyStore::File(fx.aux.path().join("review.key"));
         let err = run(&store, fx.root(), &keys, &fx.base, None).unwrap_err();
         assert!(err.to_string().contains("clean checkout"), "{err}");
+    }
+
+    #[test]
+    fn the_pull_request_that_adopts_tekmor_runs_its_own_suite_and_is_held() {
+        let repo = TempDir::new().unwrap();
+        let root = repo.path();
+        sh(root, &["init", "-q", "-b", "main"]);
+        put(root, "src/lib.rs", "fn good() {}\n");
+        commit(root, "before tekmor");
+        let base = git_text(root, &["rev-parse", "HEAD"]).unwrap();
+        sh(root, &["checkout", "-q", "-b", "adopt"]);
+        put(root, ".verify/verify.toml", "[verify]\ncommands = [\".verify/run.sh\"]\n\n[verify.default]\ncommand = [\".verify/run.sh\"]\n");
+        put(root, ".verify/run.sh", PASSING_SUITE);
+        commit(root, "adopt tekmor");
+        let fx = Fixture { repo, aux: TempDir::new().unwrap(), base };
+        let held = fx.ci(None);
+        assert_eq!(held.verdict, CiVerdict::Held, "{held:?}");
+        assert_eq!(held.exit_code, Some(0));
+        assert!(held.gaps.iter().any(|gap| gap.contains("has no [verify.default] yet")), "{held:?}");
+        assert_eq!(fx.ci(Some("maintainer")).verdict, CiVerdict::Passed);
+        assert!(fx.root().join(".verify/run.sh").is_file());
     }
 
     #[test]

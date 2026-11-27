@@ -1,18 +1,22 @@
 name: tekmor merge proof
-description: Run the base branch's tekmor checks against a pull request's commit, so a pull request cannot weaken the checks that judge it.
+description: Judge a pull request by the base branch's checks, so the pull request cannot weaken the checks that judge it.
 branding:
   icon: check-circle
   color: green
 
 inputs:
   version:
-    description: tekmor version to install from crates.io; empty installs the latest
+    description: Install this tekmor version from crates.io instead of building the copy at this action's ref
     required: false
     default: ''
   token:
     description: Token used only to read pull request reviews
     required: false
     default: ${{ github.token }}
+  approvers:
+    description: Comma-separated logins whose approval releases HELD. Set it whenever agents have their own GitHub identity with write access, and list only humans; empty accepts any owner, member or collaborator
+    required: false
+    default: ''
 
 outputs:
   verdict:
@@ -36,12 +40,13 @@ runs:
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         set -eu
         if [ -n "$VERSION" ]; then
           cargo install tekmor --locked --version "$VERSION" --root "$RUNNER_TEMP/tekmor"
         else
-          cargo install tekmor --locked --root "$RUNNER_TEMP/tekmor"
+          cargo install --path "$ACTION_PATH/tekmor" --locked --debug --root "$RUNNER_TEMP/tekmor"
         fi
 
     - name: Check out the pull request's commit
@@ -61,12 +66,16 @@ runs:
         PR: ${{ github.event.pull_request.number }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         AUTHOR: ${{ github.event.pull_request.user.login }}
+        APPROVERS: ${{ inputs.approvers }}
       run: |
-        login=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate | jq -rs --arg head "$HEAD_SHA" --arg author "$AUTHOR" '
-          add // [] | map(select(.state == "APPROVED" and .commit_id == $head and .user.login != $author
-            and (.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR")))
+        login=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate | jq -rs --arg head "$HEAD_SHA" --arg author "$AUTHOR" --arg approvers "$APPROVERS" '
+          ($approvers | split(",") | map(gsub("\\s"; "")) | map(select(length > 0))) as $allow
+          | add // [] | map(select(.state == "APPROVED" and .commit_id == $head and .user.login != $author
+            and (.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR")
+            and (($allow | length) == 0 or (.user.login as $who | $allow | index($who)) != null)))
           | last | .user.login // empty')
         echo "login=$login" >> "$GITHUB_OUTPUT"
+        if [ -n "$login" ]; then echo "approval of $HEAD_SHA by $login"; else echo "no qualifying approval of $HEAD_SHA"; fi
 
     - name: Run the base branch's checks against this commit
       id: proof
@@ -78,10 +87,29 @@ runs:
         APPROVED_BY: ${{ steps.approval.outputs.login }}
       run: |
         set +e
-        "$RUNNER_TEMP/tekmor/bin/tekmor" ci --base "$BASE_SHA" --approved-by "$APPROVED_BY" --json > "$RUNNER_TEMP/proof.json"
+        mkdir -p "$RUNNER_TEMP/tekmor-report"
+        report="$RUNNER_TEMP/tekmor-report/proof.md"
+        "$RUNNER_TEMP/tekmor/bin/tekmor" ci --base "$BASE_SHA" --approved-by "$APPROVED_BY" --markdown > "$report"
         code=$?
-        verdict=$(jq -r '.verdict // "not_verified"' "$RUNNER_TEMP/proof.json" 2>/dev/null || echo not_verified)
+        if ! grep -q '^\*\*tekmor ci: ' "$report"; then
+          printf '**tekmor ci: NOT VERIFIED**\n\ntekmor ci exited %s without a report; see the job log.\n' "$code" > "$report"
+        fi
+        case "$(sed -n 's/^\*\*tekmor ci: \(.*\)\*\*$/\1/p' "$report" | head -1)" in
+          PASSED) verdict=passed ;;
+          FAILED) verdict=failed ;;
+          HELD) verdict=held ;;
+          *) verdict=not_verified ;;
+        esac
         echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
-        jq -r '"**tekmor ci: \(.verdict)**\n\n- head `\(.head)`\n- checks from `\(.merge_base)`\n- command `\(.command // "none")` exit \(.exit_code // "none")\n" + ((.gaps // []) | map("- " + .) | join("\n"))' "$RUNNER_TEMP/proof.json" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
-        cat "$RUNNER_TEMP/proof.json"
+        cat "$report"
+        cat "$report" >> "$GITHUB_STEP_SUMMARY"
         exit $code
+
+    - name: Keep the report for the comment job
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: tekmor-merge-proof
+        path: ${{ runner.temp }}/tekmor-report/proof.md
+        if-no-files-found: ignore
+        retention-days: 7

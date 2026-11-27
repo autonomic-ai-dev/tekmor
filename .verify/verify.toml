@@ -13,4 +13,5 @@ commands = [
 
 [verify.default]
 command = [".verify/run.sh"]
-timeout_secs = 600
+timeout_secs = 1800
+hook = false
