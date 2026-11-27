@@ -136,6 +136,9 @@ pub fn classify(command: &str, root: Option<&Path>, rules: &[Rule]) -> Verdict {
     if ["review.key", "tekmor-review-key", "artifacts/reviews", "find-generic-password", "dump-keychain"].iter().any(|s| command.contains(s)) {
         return Verdict::Block("review records and their key are written only by tekmor verify review".into());
     }
+    if command.contains("verify review") {
+        return Verdict::Block("tekmor verify review signs a review of the tree, so the user runs it, not the agent".into());
+    }
     let ctx = Ctx {
         root,
         rules,
@@ -952,6 +955,15 @@ mod tests {
         }
         assert!(matches!(check("tekmor verify -- sh check.sh"), GateVerdict::Allow));
         assert!(matches!(check("echo hi"), GateVerdict::Allow));
+    }
+
+    #[test]
+    fn an_agent_cannot_sign_its_own_review() {
+        let rules = command_rules::defaults();
+        for command in ["tekmor verify review --verdict pass", "./target/debug/tekmor verify review"] {
+            assert!(matches!(classify(command, None, &rules), Verdict::Block(_)), "{command}");
+        }
+        assert!(!matches!(classify("tekmor verify receipt", None, &rules), Verdict::Block(_)));
     }
 
     const CASES: &str = include_str!("command_policy_cases.txt");

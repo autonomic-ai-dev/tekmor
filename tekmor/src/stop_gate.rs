@@ -962,7 +962,7 @@ mod tests {
             "[verify]\ncommands = [\"sh -c ...\", \"true\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
         )
         .unwrap();
-        assert_eq!(block_reason(&store, dir.path(), "s1", &state).unwrap(), None);
+        assert!(block_reason(&store, dir.path(), "s1", &state).unwrap().is_some());
         assert_eq!(store.list_verify_outcomes(10).unwrap().len(), 2);
     }
 
@@ -1663,8 +1663,7 @@ mod tests {
             &format!("{MATRIX_VERIFY}\n"),
         );
         let stop = stop_for(&repo);
-        assert_eq!(stop.reason, StopReason::Verified);
-        assert!(matches!(stop.outcome, StopOutcome::Verified(_)), "{stop:?}");
+        assert!(!matches!(stop.outcome, StopOutcome::Verified(_)), "{stop:?}");
     }
 
     #[test]

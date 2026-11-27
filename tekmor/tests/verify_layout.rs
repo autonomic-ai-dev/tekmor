@@ -118,6 +118,9 @@ fn passing_run_with_functional_suite_passes_every_run_phase() {
         "#!/usr/bin/env bash\necho ok\n",
     )
     .unwrap();
+    assert!(tekmor(home.path(), root, &["verify", "--", "make", "test"])
+        .status
+        .success());
     let output = tekmor(home.path(), root, &["verify", "--", ".verify/run.sh"]);
     assert!(
         output.status.success(),
