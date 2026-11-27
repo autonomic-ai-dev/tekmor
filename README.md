@@ -15,7 +15,7 @@ A proof eval for coding agents. tekmor runs the checks a project allowlists, rec
 
 ## What a receipt proves, and what it does not
 
-A receipt proves that your allowlisted command exited 0 on this exact tree: the commit, plus a hash of the uncommitted files.
+A receipt proves that your allowlisted command exited 0 on this exact tree: the commit, plus a hash of the uncommitted files, and that no other recorded run on the same tree failed. When `[verify.default]` is set in `.verify/verify.toml`, that command is the one that must have passed. Without it, any one passing allowlisted command is enough, so set a default that runs your full suite.
 
 It does not prove:
 

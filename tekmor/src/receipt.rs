@@ -71,25 +71,41 @@ pub struct Receipt {
     pub suite_gap: Option<String>,
 }
 
-fn suite_gap(rows: &[EvidenceRecord], head: &str, hash: &str, default_cmd: Option<&str>) -> Option<(Verdict, String)> {
+fn evidence_of(row: &EvidenceRecord) -> Evidence {
+    Evidence {
+        id: row.id.clone(),
+        cmd: row.cmd.clone(),
+        exit_code: row.exit_code,
+        recorded_at: row.recorded_at,
+        source: row.source.clone().unwrap_or_else(|| "cli".to_string()),
+        artifact: None,
+    }
+}
+
+struct SuiteGap<'a> {
+    verdict: Verdict,
+    message: String,
+    failing: Option<&'a EvidenceRecord>,
+}
+
+fn suite_gap<'a>(rows: &'a [EvidenceRecord], head: &str, hash: &str, default_cmd: Option<&str>) -> Option<SuiteGap<'a>> {
     let flaky = flaky_commands(rows, head, hash);
-    let mut failed: Vec<&str> = rows
+    let failing = rows
         .iter()
-        .filter(|row| row.is_run_for(head, hash) && row.exit_code != 0 && !flaky.contains(&row.cmd))
-        .map(|row| row.cmd.as_str())
-        .collect();
-    failed.sort_unstable();
-    failed.dedup();
-    if !failed.is_empty() {
-        return Some((Verdict::Failed, format!("failed on this tree: {}", failed.join(", "))));
+        .find(|row| row.is_run_for(head, hash) && row.exit_code != 0 && !flaky.contains(&row.cmd));
+    if let Some(row) = failing {
+        return Some(SuiteGap {
+            verdict: Verdict::Failed,
+            message: format!("`{}` failed on this tree", row.cmd),
+            failing,
+        });
     }
     let cmd = default_cmd?;
     let ran = rows.iter().any(|row| row.is_run_for(head, hash) && row.cmd == cmd && !flaky.contains(&row.cmd));
-    (!ran).then(|| {
-        (
-            Verdict::NotVerified,
-            format!("the default suite `{cmd}` has not run on this tree; run `tekmor verify -- {cmd}`"),
-        )
+    (!ran).then(|| SuiteGap {
+        verdict: Verdict::NotVerified,
+        message: format!("the default suite `{cmd}` has not run on this tree; run `tekmor verify -- {cmd}`"),
+        failing: None,
     })
 }
 
@@ -102,14 +118,7 @@ pub fn build_receipt(
     let evidence = head_sha.zip(code_hash).and_then(|(head, hash)| {
         rows.iter()
             .find(|row| row.is_run_for(head, hash) && !flaky.contains(&row.cmd))
-            .map(|row| Evidence {
-                id: row.id.clone(),
-                cmd: row.cmd.clone(),
-                exit_code: row.exit_code,
-                recorded_at: row.recorded_at,
-                source: row.source.clone().unwrap_or_else(|| "cli".to_string()),
-                artifact: None,
-            })
+            .map(evidence_of)
     });
     let verdict = match &evidence {
         None => Verdict::NotVerified,
@@ -331,15 +340,18 @@ pub fn receipt_with_keys(store: &BrainStore, root: &Path, keys: &crate::review::
     };
     let mut receipt = build_receipt(&rows, head.as_deref(), code.as_deref());
     let default_cmd = verify::load_default_step(root)?.map(|step| verify::render_argv(&step.command));
-    if let (Some(head), Some(hash)) = (head.as_deref(), code.as_deref()) {
-        if let Some((verdict, gap)) = suite_gap(&rows, head, hash, default_cmd.as_deref()) {
-            receipt.verdict = verdict;
-            receipt.suite_gap = Some(gap);
-        }
-    }
     if let Some(gap) = crate::review::gap(root, keys, code.as_deref()) {
         receipt.verdict = Verdict::NotVerified;
         receipt.review_gap = Some(gap);
+    }
+    if let (Some(head), Some(hash)) = (head.as_deref(), code.as_deref()) {
+        if let Some(gap) = suite_gap(&rows, head, hash, default_cmd.as_deref()) {
+            receipt.verdict = gap.verdict;
+            receipt.suite_gap = Some(gap.message);
+            if let Some(row) = gap.failing {
+                receipt.evidence = Some(evidence_of(row));
+            }
+        }
     }
     let unreviewed = receipt.verdict == Verdict::Passed && !crate::review::passed(root, keys, code.as_deref());
     if let Some(gap) = unreviewed.then(|| test_gap(root)).flatten() {
@@ -356,7 +368,7 @@ pub fn receipt_with_keys(store: &BrainStore, root: &Path, keys: &crate::review::
     receipt.protected_changes = protected_changes(root);
     if receipt.verdict == Verdict::Passed && !receipt.protected_changes.is_empty() && !crate::review::passed(root, keys, code.as_deref()) {
         receipt.verdict = Verdict::NotVerified;
-        receipt.suite_gap = Some(format!(
+        receipt.review_gap = Some(format!(
             "checks changed since last commit ({}); a pass review for this tree is needed",
             receipt.protected_changes.join(", ")
         ));
@@ -1018,9 +1030,10 @@ mod tests {
     #[test]
     fn a_passing_command_cannot_stand_in_for_a_configured_suite() {
         let rows = [row("true", 0, Some(HEAD), Some(HASH), Some("cli"))];
-        let (verdict, gap) = suite_gap(&rows, HEAD, HASH, Some("sh .verify/run.sh")).expect("a gap");
-        assert_eq!(verdict, Verdict::NotVerified);
-        assert!(gap.contains("sh .verify/run.sh"), "{gap}");
+        let gap = suite_gap(&rows, HEAD, HASH, Some("sh .verify/run.sh")).expect("a gap");
+        assert_eq!(gap.verdict, Verdict::NotVerified);
+        assert!(gap.message.contains("sh .verify/run.sh"), "{}", gap.message);
+        assert!(gap.failing.is_none());
     }
 
     #[test]
@@ -1029,9 +1042,10 @@ mod tests {
             row("true", 0, Some(HEAD), Some(HASH), Some("cli")),
             row("sh .verify/full.sh", 1, Some(HEAD), Some(HASH), Some("cli")),
         ];
-        let (verdict, gap) = suite_gap(&rows, HEAD, HASH, None).expect("a gap");
-        assert_eq!(verdict, Verdict::Failed);
-        assert!(gap.contains("sh .verify/full.sh"), "{gap}");
+        let gap = suite_gap(&rows, HEAD, HASH, None).expect("a gap");
+        assert_eq!(gap.verdict, Verdict::Failed);
+        assert!(gap.message.contains("sh .verify/full.sh"), "{}", gap.message);
+        assert_eq!(gap.failing.map(|row| row.cmd.as_str()), Some("sh .verify/full.sh"));
     }
 
     #[test]
@@ -1040,13 +1054,53 @@ mod tests {
             row("cargo test", 0, Some(HEAD), Some(HASH), Some("cli")),
             row("cargo test", 1, Some(HEAD), Some(HASH), Some("cli")),
         ];
-        assert_eq!(suite_gap(&rows, HEAD, HASH, None), None);
+        assert!(suite_gap(&rows, HEAD, HASH, None).is_none());
     }
 
     #[test]
     fn a_configured_suite_that_passed_on_this_tree_is_no_gap() {
         let rows = [row("sh .verify/run.sh", 0, Some(HEAD), Some(HASH), Some("cli"))];
-        assert_eq!(suite_gap(&rows, HEAD, HASH, Some("sh .verify/run.sh")), None);
+        assert!(suite_gap(&rows, HEAD, HASH, Some("sh .verify/run.sh")).is_none());
+    }
+
+    #[test]
+    fn changing_a_check_file_holds_the_verdict_until_reviewed() -> Result<()> {
+        let dir = committed(&[
+            ("src/lib.rs", RUST_TEST),
+            (".verify/verify.toml", "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n"),
+        ])?;
+        let aux = tempfile::TempDir::new()?;
+        let store = BrainStore::open(&aux.path().join("t.db"))?;
+        let keys = crate::review::KeyStore::File(aux.path().join("review.key"));
+        verify::run_default_step(&store, dir.path(), verify::VerifySource::Cli)?;
+        assert_eq!(receipt_with_keys(&store, dir.path(), &keys)?.verdict, Verdict::Passed);
+        put(dir.path(), ".verify/verify.toml", "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"exit 0\"]\n")?;
+        verify::run_default_step(&store, dir.path(), verify::VerifySource::Cli)?;
+        let held = receipt_with_keys(&store, dir.path(), &keys)?;
+        assert_eq!(held.verdict, Verdict::NotVerified);
+        assert!(held.review_gap.as_deref().is_some_and(|gap| gap.contains(".verify/verify.toml")), "{held:?}");
+        let hash = held.code_hash.clone().ok_or_else(|| anyhow::anyhow!("no code hash"))?;
+        crate::review::record(dir.path(), &keys, &hash, "pass", "reviewer", "check changed")?;
+        assert_eq!(receipt_with_keys(&store, dir.path(), &keys)?.verdict, Verdict::Passed);
+        Ok(())
+    }
+
+    #[test]
+    fn a_failed_suite_names_the_failing_run_as_evidence() -> Result<()> {
+        let dir = committed(&[(
+            ".verify/verify.toml",
+            "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"exit 3\"]\n",
+        )])?;
+        let aux = tempfile::TempDir::new()?;
+        let store = BrainStore::open(&aux.path().join("t.db"))?;
+        let keys = crate::review::KeyStore::File(aux.path().join("review.key"));
+        verify::run_default_step(&store, dir.path(), verify::VerifySource::Cli)?;
+        let receipt = receipt_with_keys(&store, dir.path(), &keys)?;
+        assert_eq!(receipt.verdict, Verdict::Failed);
+        let evidence = receipt.evidence.ok_or_else(|| anyhow::anyhow!("no evidence"))?;
+        assert_eq!(evidence.exit_code, 3);
+        assert_eq!(evidence.cmd, "sh -c 'exit 3'");
+        Ok(())
     }
 
     #[test]

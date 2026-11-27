@@ -4,6 +4,14 @@ The release history starts at v1.0.0. Earlier history is in git.
 
 ## [Unreleased]
 
+### Changed
+
+- **A failing run on the current code now fails the receipt.** Before, the newest run decided: a failing suite followed by a passing `true` read PASSED. A non-flaky failure on the same tree now gives FAILED, and the failing run is the receipt's evidence, so the stop gate names it.
+- **`[verify.default]` is the required suite when it is set.** Another passing command no longer stands in for it. `tekmor verify init` sets the default to the detected test command (for example `make test`), so running only `.verify/run.sh` in an initialised repository gives NOT VERIFIED until `make test` has run too. Without a default, one passing allowlisted command still gives PASSED.
+- **A tracked change to `.verify/verify.toml`, `run.sh` or `checks/` holds PASSED until a pass review covers the tree.** Untracked files are ignored, so a first `tekmor verify init` is unaffected.
+- **The bash gate refuses `tekmor verify review`**, matched on the command's argv, so an agent cannot sign its own review. Commands that only mention the phrase are allowed.
+- **The stop gate blocks the turn when it cannot build the receipt**, for example when `verify.toml` does not parse, instead of exiting with a non-blocking error.
+
 ## [2.0.0]
 
 The proof is tighter and the binary is smaller. A run now counts only when the exact allowlisted command ran, the stop gate and CI read the same receipt, and tekmor makes no network connection.
