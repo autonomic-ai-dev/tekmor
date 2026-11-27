@@ -17,8 +17,8 @@ Summary: GitHub Actions for tekmor. One CI workflow runs clippy, the Rust tests 
   - Outcome: A failing lint, test or hook test fails the workflow.
 - `ci-receipt`: A change's verified receipt, recorded by CI itself (H4-1, H4-2, ADR 0004).
   - Intent: Let a merge depend on evidence CI produced, not on a receipt the author made locally.
-  - Behaviour: `.github/workflows/receipt.yml` builds tekmor, runs `tekmor verify -- .verify/run.sh` in a fresh `TEKMOR_HOME`, then runs `tekmor verify receipt --markdown`. It writes the receipt to the job summary and fails unless the verdict is Passed. It has `contents: read` only.
-  - Outcome: The check fails without a passing run for the current tree. It blocks merges only after the owner adds it to the ruleset.
+  - Behaviour: `.github/workflows/merge-proof.yml` runs on `pull_request_target`, so the workflow and the tekmor binary come from the base branch. It checks out the pull request's head commit without credentials and runs `tekmor ci --base <base sha>` in a fresh `TEKMOR_HOME`, passing the login of an owner, member or collaborator (not the author) whose approving review is on that head commit. It writes the report to the job summary and fails unless the verdict is PASSED. It has `contents: read` and `pull-requests: read`. The earlier `receipt.yml` ran the pull request's own checks, so a PR that set `run.sh` to `exit 0` passed it (PR #279); it is removed.
+  - Outcome: A pull request cannot change the checks that judge it; edited checks, removed tests and risky paths are HELD until a maintainer approves the head commit. It blocks merges once "Merge proof (tekmor ci)" is a required check in the ruleset.
 - `release-publish`: Tag-driven release.
   - Intent: Ship a signed binary and release notes from a `v*` tag without a second pipeline.
   - Behaviour: `.github/workflows/release.yml` runs the CI check, then `.github/workflows/reusable-build.yml`, then publishes a GitHub release from `dist/*` with notes from `.github/scripts/changelog-extract.sh`.

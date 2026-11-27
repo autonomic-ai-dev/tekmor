@@ -11,7 +11,7 @@ H4-1 and H4-2 ask for a receipt on each pull request and a CI check that fails w
 ## Decision
 
 1. No agent is spawned from a hook. The independent checker is the receipt, `tekmor verify receipt`. Its verdict comes only from recorded runs for the current head and code tree. It exits 1 unless the verdict is Passed.
-2. CI produces its own evidence. The `receipt` workflow (`.github/workflows/receipt.yml`) builds `tekmor` in a fresh `TEKMOR_HOME`, runs `tekmor verify -- .verify/run.sh`, then checks the receipt. A local receipt is never trusted by CI. No signing key is needed.
+2. CI produces its own evidence. The `merge-proof` workflow (`.github/workflows/merge-proof.yml`, on `pull_request_target`) builds `tekmor` from the base branch and runs `tekmor ci` in a fresh `TEKMOR_HOME`, with the base branch's check files and `[verify.default]` against the pull request's commit. A local receipt is never trusted by CI. No signing key is needed. (Amended 2026-11-28: the first version ran the pull request's own `run.sh`, which the pull request could rewrite.)
 3. The receipt is written to the job summary (`$GITHUB_STEP_SUMMARY`). It is not posted as a pull request comment. That needs no write permission and creates no outward post.
 4. The workflow has `contents: read` only.
 
