@@ -4,6 +4,10 @@ The release history starts at v1.0.0. Earlier history is in git.
 
 ## [Unreleased]
 
+## [2.1.0]
+
+A pull request can no longer pass by weakening its own checks. `tekmor ci` judges it by the checks of the branch it merges into, the GitHub Action posts the result on the pull request, and the local gates close the commit, filename, session-base and fail-open holes found in review.
+
 ### Fixed
 
 - **`hook = false` on `[verify.default]` now works.** The flag was parsed and ignored, so the stop gate ran the suite inside the hook regardless. With `hook = false` the stop gate asks for a run instead, and `timeout_secs` may be up to 21600 for CI; with `hook = true` (the default) it stays capped at 600.
