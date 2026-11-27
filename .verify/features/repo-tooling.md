@@ -47,3 +47,4 @@ Summary: The scripts, Makefile and Containerfile that install, build, sign, rele
 
 - `scripts/install.sh` and the release assets use the tekmor names. They work only after the first tekmor release is published.
 - The migration script runs on each machine. Run it once per machine, after the tekmor binary is on the PATH.
+- `.gitignore` keeps `CLAUDE.local.md` (a personal instruction file) out of git. Keep personal instructions there, not in the tracked `CLAUDE.md`.

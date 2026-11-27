@@ -2,6 +2,12 @@
 
 The proof CLI: verify runs and outcomes, receipt, check summary, stop gate, bash and commit gates, feature-map gap, gate events, and Claude gate hooks. Start from the feature map in .verify/features/cli-proof.md.
 
+## Suite and review hardening
+
+The receipt's verdict depends on the suite, not on whichever command ran last. Any non-flaky failing run on the current tree makes it FAILED, so a later passing `true` cannot hide a failed suite (found by reproduction: a failing `full.sh` followed by `true` read PASSED). When `[verify.default]` is set, that command must have passed on the current tree. Without a default, a lone passing allowlisted command still reads PASSED. Requiring every allowlisted entry would break the documented one-command path, so that stays an open decision. `verify init` sets its default to the detected test command (for example `make test`), so running only `.verify/run.sh` no longer gives PASSED in an initialised repo.
+
+A tracked change to `.verify/verify.toml`, `.verify/run.sh` or `.verify/checks/` holds the verdict until a pass review covers the tree. Untracked files do not count, so the first `verify init` still reads as a normal run. The bash gate refuses any command containing `verify review`, so an agent cannot sign its own review. The signing key is still readable by a session that can read the Keychain.
+
 ## Proof hardening (v1 work)
 
 - Review, ratchet, drift, check-checks, flaky handling, claim reconciliation and the black-box check are described in the `cli-proof` feature map. Each new module has tests in its own file.
