@@ -21,7 +21,7 @@ It does not prove:
 
 - That your test suite covers the change. If the existing tests already pass on broken code, the gate opens. `tekmor verify check-checks` runs your checks against known-broken copies in `.verify/broken/`. It covers only the breakages you wrote down. The receipt also refuses PASSED when the uncommitted change removes or disables tests compared to HEAD, unless a pass review accepts it; a removal that is already committed is not caught, and detection is a pattern match.
 - That every Write and Edit was gated. The edit gate protects only the gate settings, git hooks and config, review records and tekmor's home; it does not read source edits, and it does not resolve symlinks.
-- That nobody forged a run. Runs are rows in a local SQLite file, so a local PASSED is advisory. The check that re-runs the suite in a clean environment (`receipt.yml` here) is the receipt to merge on.
+- That nobody forged a run. Runs are rows in a local SQLite file, so a local PASSED is advisory. Merge on `tekmor ci` (below), which runs the base branch's checks in CI.
 - That a commit before the session's start commit was checked. The session base comes from the `SessionStart` hook; without it, only the uncommitted change is compared.
 - Anything about files ending in `.md` or under `.claude/`. They are excluded from the tree hash.
 - Who ran the command. The hash is a SHA-256 over a defined file set, so it shows the content matched, not who ran it.
@@ -72,6 +72,33 @@ tekmor verify receipt               # show the verdict for the current code
 ```
 
 A `commands` entry must match the run's argv exactly (a trailing `...` allows extra args, and an entry may be an argv array). A string entry with shell syntax — quotes, `$`, operators, or a leading `NAME=value` — runs as `sh -c '<entry>'`.
+
+## Merge proof in CI
+
+A CI job that runs the pull request's own checks proves nothing: the pull request can rewrite them. `tekmor ci --base <REF>` runs the checks of the branch being merged into against the pull request's commit.
+
+- Every check file (all of `.verify/` except `artifacts/`, `features/`, `knowledge-base/` and Markdown) is swapped for its merge-base version during the run, and `[verify.default]` comes from the merge-base. The base must declare one.
+- The test-removal guard and risky paths compare against the merge-base, so committed changes count.
+- A pull request that edits check files, removes tests or touches risky paths is HELD until a maintainer approves that exact head commit. Re-run the job after approving.
+- Exit 0 only for PASSED.
+
+The workflow must run on `pull_request_target`, so it comes from the base branch and the pull request cannot edit it. Install your toolchain first, then add the action:
+
+```yaml
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  merge-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: autonomic-ai-dev/tekmor@<release-tag>
+```
+
+Make that job a required check in branch protection. Limits: the pull request's code still runs, with a read-only token and no secrets, and the action installs tekmor with `cargo install`. Approval releases HELD, not FAILED: a pull request whose code fails the base branch's suite on purpose (for example, it renames a test file that `run.sh` names) has to be merged with an override, then the next pull request runs the new checks. This repository runs the same steps in `.github/workflows/merge-proof.yml`, with tekmor built from the base branch.
 
 ## Layout
 

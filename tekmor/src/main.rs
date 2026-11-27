@@ -53,6 +53,29 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
+        "ci" => {
+            let Some(base) = flag_value(&args, "--base") else {
+                eprintln!("usage: tekmor ci --base <REF> [--approved-by <LOGIN>] [--markdown|--json]");
+                std::process::exit(2);
+            };
+            let approved_by = flag_value(&args, "--approved-by").filter(|login| !login.is_empty());
+            let cwd = std::env::current_dir()?;
+            let root = tekmor::config::find_repo_root(&cwd).unwrap_or(cwd);
+            let config = Config::load()?;
+            let store = tekmor::db::store::BrainStore::open(&config.db_path)?;
+            let keys = tekmor::review::default_store(&config.home);
+            let report = tekmor::ci::run(&store, &root, &keys, &base, approved_by.as_deref())?;
+            if args.iter().any(|a| a == "--json") {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else if args.iter().any(|a| a == "--markdown") {
+                print!("{}", tekmor::ci::render_markdown(&report));
+            } else {
+                print!("{}", tekmor::ci::render_text(&report));
+            }
+            if report.verdict != tekmor::ci::CiVerdict::Passed {
+                std::process::exit(1);
+            }
+        }
         "version" => {
             println!("tekmor {}", env!("CARGO_PKG_VERSION"));
         }

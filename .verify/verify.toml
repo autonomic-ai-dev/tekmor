@@ -10,3 +10,7 @@ commands = [
   "sh .verify/checks/require_tests.sh -- --test-threads=1",
   "python3 -B harness/bench/validate_traps.py",
 ]
+
+[verify.default]
+command = [".verify/run.sh"]
+timeout_secs = 600
