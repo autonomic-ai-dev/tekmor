@@ -13,6 +13,10 @@ inputs:
     description: Token used only to read pull request reviews
     required: false
     default: ${{ github.token }}
+  approvers:
+    description: Comma-separated logins whose approval releases HELD. Set it whenever agents have their own GitHub identity with write access, and list only humans; empty accepts any owner, member or collaborator
+    required: false
+    default: ''
 
 outputs:
   verdict:
@@ -62,12 +66,16 @@ runs:
         PR: ${{ github.event.pull_request.number }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         AUTHOR: ${{ github.event.pull_request.user.login }}
+        APPROVERS: ${{ inputs.approvers }}
       run: |
-        login=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate | jq -rs --arg head "$HEAD_SHA" --arg author "$AUTHOR" '
-          add // [] | map(select(.state == "APPROVED" and .commit_id == $head and .user.login != $author
-            and (.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR")))
+        login=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate | jq -rs --arg head "$HEAD_SHA" --arg author "$AUTHOR" --arg approvers "$APPROVERS" '
+          ($approvers | split(",") | map(gsub("\\s"; "")) | map(select(length > 0))) as $allow
+          | add // [] | map(select(.state == "APPROVED" and .commit_id == $head and .user.login != $author
+            and (.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR")
+            and (($allow | length) == 0 or (.user.login as $who | $allow | index($who)) != null)))
           | last | .user.login // empty')
         echo "login=$login" >> "$GITHUB_OUTPUT"
+        if [ -n "$login" ]; then echo "approval of $HEAD_SHA by $login"; else echo "no qualifying approval of $HEAD_SHA"; fi
 
     - name: Run the base branch's checks against this commit
       id: proof

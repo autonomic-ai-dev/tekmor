@@ -33,6 +33,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: ./trusted
+        with:
+          approvers: abhiudayg
 
   comment:
     name: Post the merge proof on the pull request

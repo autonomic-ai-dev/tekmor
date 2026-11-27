@@ -113,6 +113,22 @@ jobs:
 
 Make the `merge-proof` job a required check in branch protection. The comment's headline comes from the job's result; the report under it is the run's own output. A suite longer than 10 minutes needs `hook = false` in `[verify.default]` (then the stop gate asks for a run instead of running it) and may set `timeout_secs` up to 21600. Limits: the pull request's code still runs, with a read-only token and no secrets, and the action builds tekmor from its own ref with `cargo install` (set `version` to install from crates.io instead). Approval releases HELD, not FAILED: a pull request whose code fails the base branch's suite on purpose (for example, it renames a test file that `run.sh` names) has to be merged with an override, then the next pull request runs the new checks. This repository runs the same steps in `.github/workflows/merge-proof.yml`, with tekmor built from the base branch.
 
+### Run agents under their own GitHub identity
+
+An approval only means something if the agent cannot make it. When an agent pushes and opens pull requests with a maintainer's token, it can also approve or comment as that maintainer. Give agents their own identity:
+
+1. Create a machine user (a separate GitHub account) or a GitHub App for agents, and give it write access to the repository. For a machine user, create a fine-grained token limited to this repository with Contents, Pull requests and Workflows set to read and write.
+2. Point the agent at that identity only: set `GH_TOKEN` to the agent's token in the agent's environment, set `user.name` and `user.email` in the repository to the agent's noreply address, and use a credential helper that returns the agent's token for `git push`.
+3. Set `approvers` on the action to the humans whose approval counts. Without it, any collaborator's approval counts, including the agent's, so an agent could push to a human's pull request and approve it.
+
+```yaml
+      - uses: autonomic-ai-dev/tekmor@v2.1.0
+        with:
+          approvers: alice,bob
+```
+
+The agent then authors its pull requests, a listed human approves the head commit, and a re-run of the job releases HELD. An agent running as the same operating-system user as the maintainer can still reach the maintainer's stored credentials; full separation needs the agent in a container, a VM or a hosted runner where only its own token exists.
+
 ## Layout
 
 - `tekmor/` — the binary and its CLI.
