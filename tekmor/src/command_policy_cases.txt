@@ -252,3 +252,8 @@ allow node -e 'console.log(`${x}`)'
 allow echo '`rm -rf /`'
 allow echo '$(rm -rf /)'
 block echo "$(rm -rf /)"
+block cp evil.sh .git/hooks/pre-commit
+block git rev-parse HEAD > .git/tekmor-base
+block mv x .claude/settings.json
+block tee .git/config
+allow cp a.sh .verify/checks/a.sh

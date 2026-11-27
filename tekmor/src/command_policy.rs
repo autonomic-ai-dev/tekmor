@@ -583,6 +583,9 @@ fn write_verdict(target: &str, root: Option<&Path>, dir: Option<&Path>) -> Verdi
     if path == Path::new("/") || is_protected(&path) || in_system_root(&path) {
         return Verdict::Block(format!("writes a protected or system path: {target}"));
     }
+    if let Verdict::Block(reason) = edit_verdict(&path.to_string_lossy(), None) {
+        return Verdict::Block(reason);
+    }
     if root.is_some_and(|root| path.starts_with(root)) || is_scratch(&path) {
         return Verdict::Allow;
     }
@@ -908,21 +911,21 @@ pub fn edit_verdict(target: &str, cwd: Option<&Path>) -> Verdict {
         (false, Some(cwd)) => normalize(&cwd.join(path)),
         _ => normalize(path),
     };
-    let blocked = |what: &str| Verdict::Block(format!("{what} is changed by the user, not by the agent: {}", path.display()));
+    let blocked = |what: &str| Verdict::Block(format!("{what}, which only the user changes, not the agent: {}", path.display()));
     if is_settings_file(&path) {
-        return blocked("a Claude Code settings file, which registers the gates,");
+        return blocked("this is a Claude Code settings file that registers the gates");
     }
     if let Some(home) = home_dir().map(|home| normalize(&home)) {
         if PROTECTED_HOME_DIRS.iter().any(|name| path.starts_with(home.join(name)))
             || PROTECTED_HOME_FILES.iter().any(|name| path == home.join(name))
         {
-            return blocked("tekmor's home and your shell and git configuration are");
+            return blocked("this is in tekmor's home or your shell or git configuration");
         }
     }
     let components: Vec<_> = path.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect();
     let under = |dir: &[&str]| components.windows(dir.len()).any(|window| window.iter().zip(dir).all(|(a, b)| a == b));
-    if under(&[".git", "hooks"]) || under(&[".git", "config"]) || under(&[".verify", "artifacts", "reviews"]) {
-        return blocked("git hooks, git config and signed review records are");
+    if under(&[".git"]) || under(&[".verify", "artifacts", "reviews"]) {
+        return blocked("this is git metadata (hooks, config, the session base) or a signed review record");
     }
     Verdict::Allow
 }
@@ -1039,6 +1042,7 @@ mod tests {
         assert!(blocked(".claude/settings.local.json"));
         assert!(blocked("/work/repo/.git/hooks/pre-commit"));
         assert!(blocked("/work/repo/.git/config"));
+        assert!(blocked("/work/repo/.git/tekmor-base"));
         assert!(blocked("/work/repo/.verify/artifacts/reviews/abc.json"));
         assert!(blocked("/work/repo/src/../.claude/settings.json"));
         assert!(!blocked("/work/repo/src/main.rs"));
