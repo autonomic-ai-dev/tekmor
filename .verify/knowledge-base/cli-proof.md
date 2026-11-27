@@ -6,7 +6,11 @@ The proof CLI: verify runs and outcomes, receipt, check summary, stop gate, bash
 
 The receipt's verdict depends on the suite, not on whichever command ran last. Any non-flaky failing run on the current tree makes it FAILED, so a later passing `true` cannot hide a failed suite (found by reproduction: a failing `full.sh` followed by `true` read PASSED). When `[verify.default]` is set, that command must have passed on the current tree. Without a default, a lone passing allowlisted command still reads PASSED. Requiring every allowlisted entry would break the documented one-command path, so that stays an open decision. `verify init` sets its default to the detected test command (for example `make test`), so running only `.verify/run.sh` no longer gives PASSED in an initialised repo.
 
-A tracked change to `.verify/verify.toml`, `.verify/run.sh` or `.verify/checks/` holds the verdict until a pass review covers the tree. Untracked files do not count, so the first `verify init` still reads as a normal run. The bash gate refuses any command containing `verify review`, so an agent cannot sign its own review. The signing key is still readable by a session that can read the Keychain.
+When the verdict is FAILED because of a suite failure, the receipt's evidence is the failing run, not the newest run. Before this, a failing `full.sh` followed by a passing `true` made the stop gate say "`true` exited with 0". A failing run also wins over a review gap in the verdict.
+
+A tracked change to `.verify/verify.toml`, `.verify/run.sh` or `.verify/checks/` holds the verdict until a pass review covers the tree, and is reported through `review_gap` so the stop gate asks for the review command instead of rerunning the suite or reporting a missing check. Untracked files do not count, so the first `verify init` still reads as a normal run. The bash gate matches the argv `tekmor verify review` per command segment, including scripts it reads, rather than a substring, so a grep or commit message that mentions the phrase is not blocked. A session that can read the Keychain can still sign.
+
+If the receipt cannot be built (for example a `verify.toml` that does not parse), the stop gate blocks the turn with the error. A plain error exit is treated by the host as non-blocking and would let the turn end.
 
 ## Proof hardening (v1 work)
 

@@ -136,9 +136,6 @@ pub fn classify(command: &str, root: Option<&Path>, rules: &[Rule]) -> Verdict {
     if ["review.key", "tekmor-review-key", "artifacts/reviews", "find-generic-password", "dump-keychain"].iter().any(|s| command.contains(s)) {
         return Verdict::Block("review records and their key are written only by tekmor verify review".into());
     }
-    if command.contains("verify review") {
-        return Verdict::Block("tekmor verify review signs a review of the tree, so the user runs it, not the agent".into());
-    }
     let ctx = Ctx {
         root,
         rules,
@@ -233,6 +230,12 @@ fn without_heredoc_data(command: &str) -> String {
     kept.join("\n")
 }
 
+fn signs_review(words: &[&str]) -> bool {
+    words
+        .windows(3)
+        .any(|w| w[1] == "verify" && w[2] == "review" && Path::new(w[0]).file_name().is_some_and(|name| name == "tekmor"))
+}
+
 fn classify_in(command: &str, ctx: Ctx<'_>, mut dir: Option<PathBuf>) -> Verdict {
     if bypasses_git_hooks(command) {
         return Verdict::Block("it skips git hooks; commits must run the pre-commit guard".into());
@@ -255,6 +258,12 @@ fn classify_in(command: &str, ctx: Ctx<'_>, mut dir: Option<PathBuf>) -> Verdict
         let start = command_start(&words);
         let step = segment_verdict(&words[..start], &words[start..], ctx, &mut dir);
         verdict = merge(verdict, step);
+        if signs_review(&words) {
+            verdict = merge(
+                verdict,
+                Verdict::Block("tekmor verify review signs a review of the tree, so the user runs it, not the agent".into()),
+            );
+        }
     }
     for target in redirect_targets(&visible) {
         for base in [ctx.root, dir.as_deref()] {
@@ -960,10 +969,22 @@ mod tests {
     #[test]
     fn an_agent_cannot_sign_its_own_review() {
         let rules = command_rules::defaults();
-        for command in ["tekmor verify review --verdict pass", "./target/debug/tekmor verify review"] {
+        for command in [
+            "tekmor verify review --verdict pass",
+            "./target/debug/tekmor verify review",
+            "tekmor  verify 'review'",
+            "env X=1 tekmor verify review",
+            "true && tekmor verify review",
+        ] {
             assert!(matches!(classify(command, None, &rules), Verdict::Block(_)), "{command}");
         }
-        assert!(!matches!(classify("tekmor verify receipt", None, &rules), Verdict::Block(_)));
+        for command in [
+            "tekmor verify receipt",
+            "grep 'verify review' README.md",
+            "git commit -m 'document verify review'",
+        ] {
+            assert!(!matches!(classify(command, None, &rules), Verdict::Block(_)), "{command}");
+        }
     }
 
     const CASES: &str = include_str!("command_policy_cases.txt");

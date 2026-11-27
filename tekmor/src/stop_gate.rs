@@ -267,7 +267,10 @@ pub fn run_stop_gate() -> Result<()> {
     let repo_state =
         state_file.with_file_name(format!("stop-gate-state-{}.json", repo_name(&root)));
     let keys = crate::review::default_store(&config.home);
-    let Stop { outcome, reason } = match evaluate_stop(&store, &root, &keys, &session_id, &repo_state, mode)? {
+    let evaluated = evaluate_stop(&store, &root, &keys, &session_id, &repo_state, mode).unwrap_or_else(|err| {
+        hook_blocked(&format!("tekmor could not evaluate the receipt ({err:#}); the turn is blocked until the gate can read its inputs"))
+    });
+    let Stop { outcome, reason } = match evaluated {
         Stop { outcome: StopOutcome::Clear, .. } => claim_gap(&store, &root, transcript.as_deref()).map_or(
             Stop {
                 outcome: StopOutcome::Clear,
@@ -962,7 +965,8 @@ mod tests {
             "[verify]\ncommands = [\"sh -c ...\", \"true\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
         )
         .unwrap();
-        assert!(block_reason(&store, dir.path(), "s1", &state).unwrap().is_some());
+        let held = block_reason(&store, dir.path(), "s1", &state).unwrap().unwrap();
+        assert!(held.contains("checks changed since last commit") && held.contains("verify review"), "{held}");
         assert_eq!(store.list_verify_outcomes(10).unwrap().len(), 2);
     }
 
@@ -1663,7 +1667,8 @@ mod tests {
             &format!("{MATRIX_VERIFY}\n"),
         );
         let stop = stop_for(&repo);
-        assert!(!matches!(stop.outcome, StopOutcome::Verified(_)), "{stop:?}");
+        assert_eq!(stop.reason, StopReason::ReviewGap, "{stop:?}");
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
     }
 
     #[test]
