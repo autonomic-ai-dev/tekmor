@@ -6,6 +6,18 @@ The release history starts at v1.0.0. Earlier history is in git.
 
 ### Fixed
 
+- **`hook = false` on `[verify.default]` now works.** The flag was parsed and ignored, so the stop gate ran the suite inside the hook regardless. With `hook = false` the stop gate asks for a run instead, and `timeout_secs` may be up to 21600 for CI; with `hook = true` (the default) it stays capped at 600.
+- **The stop gate blocks the turn when it cannot load its config or open the run store.** Both errors used to exit 1, which Claude Code treats as non-blocking, so the turn ended unchecked.
+- **`tekmor verify init` writes a default suite its own allowlist accepts.** In pnpm, yarn and bun repositories the allowlist said `pnpm test` (or `yarn`, `bun`) but the default said `npm test`, so the first suite was refused. One detection function now feeds both.
+- **The session base survives resume, `/clear` and auto-compact.** `SessionStart` fires for all four; the base is now recorded only on `startup`, or when no valid base exists.
+- **Shell writes into `.git/` and Claude Code settings are refused by the bash gate too.** The edit gate already refused them, but `cp`, `mv`, `tee` and redirects were allowed, so `git rev-parse HEAD > .git/tekmor-base` hid a commit from the stop gate. Both gates now share one protected-path check, and the edit gate refuses every path under `.git/`.
+
+### Added (merge proof)
+
+- **A comment on the pull request.** `comment/action.yml` keeps one comment per pull request up to date with the merge proof report, from a separate job that never checks out the pull request's code. `merge-proof.yml` uses it, and uses the root `action.yml` for the proof itself.
+- **The pull request that adopts tekmor can pass.** When the base has no `[verify.default]` and the pull request adds one, `tekmor ci` runs the pull request's suite and holds it for approval, instead of NOT VERIFIED forever.
+- **The action builds tekmor from its own ref** by default, so the action's tag and the binary always match; `version` installs from crates.io instead.
+
 - **A commit made mid-turn no longer clears the stop gate.** The gate treated only the uncommitted diff as changed code, so editing, committing and stopping asked for no proof, and a committed `run.sh` reduced to `true`, deleted tests or edited risky paths read PASSED. `tekmor install` now also registers a `SessionStart` hook (`tekmor session-start`) that records the starting commit in `.git/tekmor-base`; changed code, the checks-changed hold, the test-removal guard and risky paths all compare against it. `TEKMOR_BASE=<sha>` sets it explicitly. A base that is not an ancestor of HEAD is ignored. Without a recorded base the old behaviour holds.
 - **Files with spaces or non-ASCII names are part of the tree hash.** `git status` quoted those paths, so they hashed as deleted and editing them kept an old PASSED. All three change parsers now read `git status --porcelain=v1 -z` through one function.
 - **Deleting a file now counts as an edit** for the stop gate, so deleting a test file alone no longer clears the turn.

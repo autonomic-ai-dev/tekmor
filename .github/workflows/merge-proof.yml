@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
   group: merge-proof-${{ github.event.pull_request.number }}
@@ -20,59 +19,38 @@ jobs:
   proof:
     name: Merge proof (tekmor ci)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
-      - name: Check out the base branch, which supplies tekmor
+      - name: Check out the base branch, which supplies the action and tekmor
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: trusted
           persist-credentials: false
 
-      - uses: ./trusted/.github/actions/setup-protoc
-
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build tekmor from the base branch
-        run: cargo build --manifest-path trusted/Cargo.toml -p tekmor --all-features --target-dir "$RUNNER_TEMP/tekmor-target"
+      - uses: ./trusted
 
-      - name: Check out the pull request's commit
+  comment:
+    name: Post the merge proof on the pull request
+    needs: proof
+    if: always() && needs.proof.result != 'skipped' && needs.proof.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out the base branch's comment action
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr
-          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          sparse-checkout: comment
           persist-credentials: false
 
-      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: ./trusted/comment
         with:
-          workspaces: pr
-          save-if: false
-
-      - name: Find a maintainer approval of this exact commit
-        id: approval
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          AUTHOR: ${{ github.event.pull_request.user.login }}
-        run: |
-          login=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate | jq -rs --arg head "$HEAD_SHA" --arg author "$AUTHOR" '
-            add // [] | map(select(.state == "APPROVED" and .commit_id == $head and .user.login != $author
-              and (.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR")))
-            | last | .user.login // empty')
-          echo "login=$login" >> "$GITHUB_OUTPUT"
-
-      - name: Run the base branch's checks against this commit
-        working-directory: pr
-        env:
-          TEKMOR_HOME: ${{ runner.temp }}/tekmor-home
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          APPROVED_BY: ${{ steps.approval.outputs.login }}
-        run: |
-          set +e
-          "$RUNNER_TEMP/tekmor-target/debug/tekmor" ci --base "$BASE_SHA" --approved-by "$APPROVED_BY" --markdown > "$RUNNER_TEMP/proof.md"
-          code=$?
-          cat "$RUNNER_TEMP/proof.md"
-          cat "$RUNNER_TEMP/proof.md" >> "$GITHUB_STEP_SUMMARY"
-          exit $code
+          result: ${{ needs.proof.result }}

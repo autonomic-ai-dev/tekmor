@@ -1,0 +1,64 @@
+name: tekmor merge proof comment
+description: Post or update one comment on the pull request with the tekmor merge proof report. Run it in a separate job that never checks out the pull request's code.
+
+inputs:
+  result:
+    description: The proof job's result (needs.<job>.result)
+    required: true
+  token:
+    description: Token with pull-requests write, used only to post the comment
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch the report
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: tekmor-merge-proof
+        path: ${{ runner.temp }}/tekmor-merge-proof
+
+    - name: Post or update the comment
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        RESULT: ${{ inputs.result }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -eu
+        marker='<!-- tekmor-merge-proof -->'
+        case "$RESULT" in
+          success) headline='**Merge proof: PASSED**' ;;
+          failure) headline='**Merge proof: not passed**: FAILED, HELD or NOT VERIFIED; the report below says which' ;;
+          *) headline="**Merge proof: did not finish** (job result: $RESULT)" ;;
+        esac
+        report="$RUNNER_TEMP/tekmor-merge-proof/proof.md"
+        body="$RUNNER_TEMP/tekmor-merge-proof-comment.md"
+        {
+          echo "$marker"
+          echo "$headline"
+          echo
+          echo "Commit \`${HEAD_SHA:0:12}\` · [run]($RUN_URL) · the headline comes from the job result; the report below is the run's own output."
+          echo
+          if [ -s "$report" ]; then
+            echo '<details open><summary>Report</summary>'
+            echo
+            head -c 60000 "$report"
+            echo
+            echo '</details>'
+          else
+            echo '_No report was produced; see the run log._'
+          fi
+        } > "$body"
+        existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | tail -1)
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F "body=@$body" > /dev/null
+        else
+          gh api -X POST "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
+        fi
