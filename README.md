@@ -15,12 +15,14 @@ A proof eval for coding agents. tekmor runs the checks a project allowlists, rec
 
 ## What a receipt proves, and what it does not
 
-A receipt proves that your allowlisted command exited 0 on this exact tree: the commit, plus a hash of the uncommitted files.
+A receipt proves that your allowlisted command exited 0 on this exact tree: the commit, plus a hash of the uncommitted files, and that no other recorded run on the same tree failed. When `[verify.default]` is set in `.verify/verify.toml`, that command is the one that must have passed. Without it, any one passing allowlisted command is enough, so set a default that runs your full suite.
 
 It does not prove:
 
 - That your test suite covers the change. If the existing tests already pass on broken code, the gate opens. `tekmor verify check-checks` runs your checks against known-broken copies in `.verify/broken/`. It covers only the breakages you wrote down. The receipt also refuses PASSED when the uncommitted change removes or disables tests compared to HEAD, unless a pass review accepts it; a removal that is already committed is not caught, and detection is a pattern match.
-- That the agent's Write and Edit tools were gated. The gates see Bash commands only.
+- That every Write and Edit was gated. The edit gate protects only the gate settings, git hooks and config, review records and tekmor's home; it does not read source edits, and it does not resolve symlinks.
+- That nobody forged a run. Runs are rows in a local SQLite file, so a local PASSED is advisory. The check that re-runs the suite in a clean environment (`receipt.yml` here) is the receipt to merge on.
+- That a commit before the session's start commit was checked. The session base comes from the `SessionStart` hook; without it, only the uncommitted change is compared.
 - Anything about files ending in `.md` or under `.claude/`. They are excluded from the tree hash.
 - Who ran the command. The hash is a SHA-256 over a defined file set, so it shows the content matched, not who ran it.
 - Enforcement outside Claude Code. Elsewhere tekmor writes receipts, and nothing stops an agent from ignoring them.

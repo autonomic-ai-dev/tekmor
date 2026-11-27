@@ -4,6 +4,26 @@ The release history starts at v1.0.0. Earlier history is in git.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A commit made mid-turn no longer clears the stop gate.** The gate treated only the uncommitted diff as changed code, so editing, committing and stopping asked for no proof, and a committed `run.sh` reduced to `true`, deleted tests or edited risky paths read PASSED. `tekmor install` now also registers a `SessionStart` hook (`tekmor session-start`) that records the starting commit in `.git/tekmor-base`; changed code, the checks-changed hold, the test-removal guard and risky paths all compare against it. `TEKMOR_BASE=<sha>` sets it explicitly. A base that is not an ancestor of HEAD is ignored. Without a recorded base the old behaviour holds.
+- **Files with spaces or non-ASCII names are part of the tree hash.** `git status` quoted those paths, so they hashed as deleted and editing them kept an old PASSED. All three change parsers now read `git status --porcelain=v1 -z` through one function.
+- **Deleting a file now counts as an edit** for the stop gate, so deleting a test file alone no longer clears the turn.
+- **A review is bound to the commit it was signed on**, not only the tree hash, so it cannot carry over to another commit with the same tree. Reviews signed by earlier builds no longer match; sign them again.
+
+### Added
+
+- **An edit gate** (`tekmor edit-gate`, PreToolUse on Write, Edit, MultiEdit and NotebookEdit) refuses edits to Claude Code settings files, `.git/hooks`, `.git/config`, signed review records, tekmor's home and the shell and git configuration. Run `tekmor install` again to register it.
+- `tekmor doctor` reports a repository whose `verify.toml` has no `[verify.default]` and a hook install that lacks the new hooks.
+
+### Changed
+
+- **A failing run on the current code now fails the receipt.** Before, the newest run decided: a failing suite followed by a passing `true` read PASSED. A non-flaky failure on the same tree now gives FAILED, and the failing run is the receipt's evidence, so the stop gate names it.
+- **`[verify.default]` is the required suite when it is set.** Another passing command no longer stands in for it. `tekmor verify init` sets the default to the detected test command (for example `make test`), so running only `.verify/run.sh` in an initialised repository gives NOT VERIFIED until `make test` has run too. Without a default, one passing allowlisted command still gives PASSED.
+- **A tracked change to `.verify/verify.toml`, `run.sh` or `checks/` holds PASSED until a pass review covers the tree.** Untracked files are ignored, so a first `tekmor verify init` is unaffected.
+- **The bash gate refuses `tekmor verify review`**, matched on the command's argv, so an agent cannot sign its own review. Commands that only mention the phrase are allowed.
+- **The stop gate blocks the turn when it cannot build the receipt**, for example when `verify.toml` does not parse, instead of exiting with a non-blocking error.
+
 ## [2.0.0]
 
 The proof is tighter and the binary is smaller. A run now counts only when the exact allowlisted command ran, the stop gate and CI read the same receipt, and tekmor makes no network connection.

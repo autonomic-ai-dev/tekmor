@@ -94,18 +94,34 @@ fn tekmor_subcommand(subcommand: &str) -> Result<String> {
 
 fn is_gate_subcommand(cmd: &str) -> bool {
     let cmd = cmd.trim_end();
-    cmd.ends_with(" stop-gate") || cmd.ends_with(" commit-gate") || cmd.ends_with(" bash-gate")
+    [" stop-gate", " commit-gate", " bash-gate", " edit-gate", " session-start"]
+        .iter()
+        .any(|suffix| cmd.ends_with(suffix))
 }
 
 pub fn install_claude_code_hooks(user: bool, quiet: bool) -> Result<PathBuf> {
     let settings = claude_code_settings_path(user)?;
     let fragment = json!({
         "hooks": {
+            "SessionStart": [{
+                "hooks": [{
+                    "type": "command",
+                    "command": tekmor_subcommand("session-start")?,
+                    "timeout": 30
+                }]
+            }],
             "PreToolUse": [{
                 "matcher": "Bash",
                 "hooks": [{
                     "type": "command",
                     "command": tekmor_subcommand("bash-gate")?,
+                    "timeout": 30
+                }]
+            }, {
+                "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+                "hooks": [{
+                    "type": "command",
+                    "command": tekmor_subcommand("edit-gate")?,
                     "timeout": 30
                 }]
             }],

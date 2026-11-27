@@ -6,7 +6,25 @@ The proof CLI: verify runs and outcomes, receipt, check summary, stop gate, bash
 
 The receipt's verdict depends on the suite, not on whichever command ran last. Any non-flaky failing run on the current tree makes it FAILED, so a later passing `true` cannot hide a failed suite (found by reproduction: a failing `full.sh` followed by `true` read PASSED). When `[verify.default]` is set, that command must have passed on the current tree. Without a default, a lone passing allowlisted command still reads PASSED. Requiring every allowlisted entry would break the documented one-command path, so that stays an open decision. `verify init` sets its default to the detected test command (for example `make test`), so running only `.verify/run.sh` no longer gives PASSED in an initialised repo.
 
-A tracked change to `.verify/verify.toml`, `.verify/run.sh` or `.verify/checks/` holds the verdict until a pass review covers the tree. Untracked files do not count, so the first `verify init` still reads as a normal run. The bash gate refuses any command containing `verify review`, so an agent cannot sign its own review. The signing key is still readable by a session that can read the Keychain.
+When the verdict is FAILED because of a suite failure, the receipt's evidence is the failing run, not the newest run. Before this, a failing `full.sh` followed by a passing `true` made the stop gate say "`true` exited with 0". A failing run also wins over a review gap in the verdict.
+
+A tracked change to `.verify/verify.toml`, `.verify/run.sh` or `.verify/checks/` holds the verdict until a pass review covers the tree, and is reported through `review_gap` so the stop gate asks for the review command instead of rerunning the suite or reporting a missing check. Untracked files do not count, so the first `verify init` still reads as a normal run. The bash gate matches the argv `tekmor verify review` per command segment, including scripts it reads, rather than a substring, so a grep or commit message that mentions the phrase is not blocked. A session that can read the Keychain can still sign.
+
+If the receipt cannot be built (for example a `verify.toml` that does not parse), the stop gate blocks the turn with the error. A plain error exit is treated by the host as non-blocking and would let the turn end.
+
+## Closing the commit and path holes
+
+Found by reading the code: the gate defined changed code as the uncommitted diff, so any action that empties the diff emptied the proof requirement. Committing before stopping cleared the stop gate and also hid a weakened `run.sh`, deleted tests and risky-path edits from the receipt. The fix is a session base: a `SessionStart` hook records HEAD in `.git/tekmor-base` (inside the git dir, so never part of the tree hash), and every "what changed" question diffs against it. The base is validated as an ancestor of HEAD at read time, so a reset or rebase falls back to HEAD instead of trusting a stale sha. One file per repository means two sessions in one repository share it; the later start wins.
+
+CI deliberately does not set `TEKMOR_BASE` yet. The checkout there is the merge commit, a review is bound to a head sha, and nothing in CI can sign one, so a base would make every PR that edits `run.sh` or `checks/` unmergeable. Reading PR approvals as the review is the step that unblocks it.
+
+`git status` without `-z` quotes names with spaces or non-ASCII characters; the old parser then failed to read them and hashed the constant `<deleted>`, so edits never changed the hash. One `-z` parser (`verify::git_changes`) now feeds the tree hash, the stop gate and the checks-changed list. A rename lists the new path once and skips the origin entry.
+
+A deleted path has no mtime, so the stop gate used to see no edit and clear the turn; it now falls back to the parent directory's mtime, which a deletion updates.
+
+Reviews sign the head sha as well as the tree hash. Earlier records lack the field and no longer verify.
+
+The edit gate closes the cheapest way to switch the gates off, the Write and Edit tools on the settings file, but it matches the normalised path only. A symlink into a protected path, and a Bash-free write by another tool, are not seen. Run rows are still unsigned local SQLite rows and the review key is still readable by a session with Keychain access: both need an ACL-restricted Keychain item or a CI-signed receipt, neither of which can be checked without touching the real Keychain, so they stay open.
 
 ## Proof hardening (v1 work)
 

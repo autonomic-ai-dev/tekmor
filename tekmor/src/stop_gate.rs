@@ -163,23 +163,7 @@ fn git_root(cwd: &Path) -> Option<PathBuf> {
 }
 
 pub(crate) fn changed_paths(root: &Path) -> Vec<String> {
-    let Ok(out) = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["status", "--porcelain", "--untracked-files=all"])
-        .output()
-    else {
-        return Vec::new();
-    };
-    if !out.status.success() {
-        return Vec::new();
-    }
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|line| line.get(3..))
-        .filter_map(|path| path.rsplit(" -> ").next())
-        .map(str::to_string)
-        .collect()
+    verify::changed_files(root).unwrap_or_default()
 }
 
 fn repo_name(repo: &Path) -> String {
@@ -195,7 +179,14 @@ fn named_reason(root: &Path, reason: &str) -> String {
 fn last_edit_ms(root: &Path, changed: &[String]) -> Option<i64> {
     changed
         .iter()
-        .filter_map(|path| root.join(path).metadata().ok()?.modified().ok())
+        .filter_map(|path| {
+            let file = root.join(path);
+            let stamp = file
+                .metadata()
+                .or_else(|err| file.parent().ok_or(err).and_then(|dir| dir.metadata()))
+                .ok()?;
+            stamp.modified().ok()
+        })
         .filter_map(|modified| modified.duration_since(UNIX_EPOCH).ok())
         .map(|elapsed| elapsed.as_millis() as i64)
         .max()
@@ -245,6 +236,20 @@ pub fn hook_blocked(message: &str) -> ! {
     std::process::exit(2)
 }
 
+pub fn run_session_start() -> Result<()> {
+    let mut raw = String::new();
+    std::io::stdin().read_to_string(&mut raw)?;
+    let input: StopInput = serde_json::from_str(&raw).unwrap_or_default();
+    let cwd = input
+        .cwd
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    if let Some(root) = git_root(&cwd) {
+        verify::record_session_base(&root)?;
+    }
+    Ok(())
+}
+
 pub fn run_stop_gate() -> Result<()> {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw)?;
@@ -267,7 +272,10 @@ pub fn run_stop_gate() -> Result<()> {
     let repo_state =
         state_file.with_file_name(format!("stop-gate-state-{}.json", repo_name(&root)));
     let keys = crate::review::default_store(&config.home);
-    let Stop { outcome, reason } = match evaluate_stop(&store, &root, &keys, &session_id, &repo_state, mode)? {
+    let evaluated = evaluate_stop(&store, &root, &keys, &session_id, &repo_state, mode).unwrap_or_else(|err| {
+        hook_blocked(&format!("tekmor could not evaluate the receipt ({err:#}); the turn is blocked until the gate can read its inputs"))
+    });
+    let Stop { outcome, reason } = match evaluated {
         Stop { outcome: StopOutcome::Clear, .. } => claim_gap(&store, &root, transcript.as_deref()).map_or(
             Stop {
                 outcome: StopOutcome::Clear,
@@ -962,7 +970,8 @@ mod tests {
             "[verify]\ncommands = [\"sh -c ...\", \"true\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
         )
         .unwrap();
-        assert!(block_reason(&store, dir.path(), "s1", &state).unwrap().is_some());
+        let held = block_reason(&store, dir.path(), "s1", &state).unwrap().unwrap();
+        assert!(held.contains("checks changed since last commit") && held.contains("verify review"), "{held}");
         assert_eq!(store.list_verify_outcomes(10).unwrap().len(), 2);
     }
 
@@ -1655,6 +1664,39 @@ mod tests {
     }
 
     #[test]
+    fn a_commit_made_mid_turn_does_not_clear_the_gate() {
+        let repo = committed_repo(MATRIX_FAILING_VERIFY, gate_baseline());
+        verify::record_session_base(repo.dir.path()).unwrap();
+        write_file(repo.dir.path(), "src/a.rs", "fn a() {}\n");
+        git_in(repo.dir.path(), &["add", "-A"]);
+        git_in(repo.dir.path(), &["-c", "user.name=gate", "-c", "user.email=gate@test", "commit", "-qm", "work"]);
+        let stop = stop_for(&repo);
+        assert_eq!(stop.reason, StopReason::CheckFailed, "{stop:?}");
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
+    }
+
+    #[test]
+    fn a_commit_without_a_recorded_session_base_is_the_documented_gap() {
+        let repo = committed_repo(MATRIX_FAILING_VERIFY, gate_baseline());
+        write_file(repo.dir.path(), "src/a.rs", "fn a() {}\n");
+        git_in(repo.dir.path(), &["add", "-A"]);
+        git_in(repo.dir.path(), &["-c", "user.name=gate", "-c", "user.email=gate@test", "commit", "-qm", "work"]);
+        assert_eq!(stop_for(&repo).reason, StopReason::Clear);
+    }
+
+    #[test]
+    fn a_deleted_file_alone_demands_proof() {
+        let repo = committed_repo(MATRIX_FAILING_VERIFY, {
+            let mut baseline = gate_baseline();
+            baseline.push(("tests/a_test.rs", "#[test]\nfn a() {}\n".to_string()));
+            baseline
+        });
+        fs::remove_file(repo.dir.path().join("tests/a_test.rs")).unwrap();
+        let stop = stop_for(&repo);
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
+    }
+
+    #[test]
     fn editing_only_verify_toml_still_demands_proof() {
         let repo = committed_repo(MATRIX_VERIFY, gate_baseline());
         write_file(
@@ -1663,7 +1705,8 @@ mod tests {
             &format!("{MATRIX_VERIFY}\n"),
         );
         let stop = stop_for(&repo);
-        assert!(!matches!(stop.outcome, StopOutcome::Verified(_)), "{stop:?}");
+        assert_eq!(stop.reason, StopReason::ReviewGap, "{stop:?}");
+        assert!(matches!(stop.outcome, StopOutcome::Block(_)), "{stop:?}");
     }
 
     #[test]

@@ -41,6 +41,42 @@ pub fn hook_binaries(settings: &Value) -> Vec<String> {
     out
 }
 
+fn hook_subcommands(settings: &Value) -> Vec<String> {
+    let Some(events) = settings.get("hooks").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    events
+        .values()
+        .filter_map(Value::as_array)
+        .flatten()
+        .flat_map(|group| group.get("hooks").and_then(Value::as_array).into_iter().flatten())
+        .filter_map(|hook| hook.get("command")?.as_str()?.split_whitespace().last().map(str::to_string))
+        .collect()
+}
+
+fn missing_gate_hooks(settings: &Value) -> Vec<&'static str> {
+    let installed = hook_subcommands(settings);
+    if !installed.iter().any(|name| name == "stop-gate" || name == "bash-gate") {
+        return Vec::new();
+    }
+    ["session-start", "edit-gate"]
+        .into_iter()
+        .filter(|name| !installed.iter().any(|installed| installed == name))
+        .collect()
+}
+
+fn check_default_suite(root: &Path) -> Vec<Finding> {
+    match crate::verify::load_default_step(root) {
+        Ok(Some(_)) => vec![finding(true, "suite", "[verify.default] names the suite every receipt requires")],
+        Ok(None) if !crate::verify::load_command_allowlist(root).is_empty() => vec![finding(
+            false,
+            "suite",
+            "no [verify.default] in .verify/verify.toml, so any one passing allowlisted command reads PASSED; add a default that runs your full suite",
+        )],
+        _ => Vec::new(),
+    }
+}
+
 fn is_assignment(token: &str) -> bool {
     token.split_once('=').is_some_and(|(key, _)| {
         !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
@@ -137,6 +173,10 @@ fn check_hooks(root: &Path, current: &Path, path_var: &str) -> Vec<Finding> {
             out.push(finding(false, "hooks", format!("{} is not valid JSON", path.display())));
             continue;
         };
+        let missing = missing_gate_hooks(&value);
+        if !missing.is_empty() {
+            out.push(finding(false, "hooks", format!("{} lacks the {} hook; run `tekmor install` again", path.display(), missing.join(" and "))));
+        }
         for bin in hook_binaries(&value) {
             found += 1;
             let bin_path = if bin.contains('/') {
@@ -248,6 +288,7 @@ pub fn run(root: &Path) -> Result<bool> {
     findings.extend(check_hooks(root, &current, &path_var));
     findings.extend(check_git(root));
     findings.extend(check_allowlist(root, &path_var));
+    findings.extend(check_default_suite(root));
     match crate::config::Config::load() {
         Ok(config) => findings.extend(check_store(&config.db_path)),
         Err(_) => findings.push(finding(false, "store", "cannot resolve TEKMOR_HOME")),
@@ -286,6 +327,35 @@ mod tests {
         .expect("feature map");
         let findings = check_drift(dir.path());
         assert!(findings.iter().any(|f| !f.ok && f.detail.contains("missing")), "{:?}", details(&findings));
+    }
+
+    #[test]
+    fn an_install_from_before_the_session_and_edit_gates_is_reported() {
+        let old = serde_json::json!({
+            "hooks": {
+                "Stop": [{"hooks": [{"type": "command", "command": "'/x/tekmor' stop-gate"}]}],
+                "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "'/x/tekmor' bash-gate"}]}]
+            }
+        });
+        assert_eq!(missing_gate_hooks(&old), ["session-start", "edit-gate"]);
+        let unrelated = serde_json::json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "other"}]}]}});
+        assert!(missing_gate_hooks(&unrelated).is_empty());
+    }
+
+    #[test]
+    fn a_missing_default_suite_is_a_failure_only_when_an_allowlist_exists() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        assert!(check_default_suite(dir.path()).is_empty());
+        fs::create_dir_all(dir.path().join(".verify")).expect("verify dir");
+        fs::write(dir.path().join(".verify/verify.toml"), "[verify]\ncommands = [\"make test\"]\n").expect("toml");
+        let findings = check_default_suite(dir.path());
+        assert!(findings.iter().any(|f| !f.ok && f.detail.contains("[verify.default]")), "{:?}", details(&findings));
+        fs::write(
+            dir.path().join(".verify/verify.toml"),
+            "[verify]\ncommands = [\"make test\"]\n\n[verify.default]\ncommand = [\"make\", \"test\"]\n",
+        )
+        .expect("toml");
+        assert!(check_default_suite(dir.path()).iter().all(|f| f.ok));
     }
 
     #[test]

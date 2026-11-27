@@ -136,9 +136,6 @@ pub fn classify(command: &str, root: Option<&Path>, rules: &[Rule]) -> Verdict {
     if ["review.key", "tekmor-review-key", "artifacts/reviews", "find-generic-password", "dump-keychain"].iter().any(|s| command.contains(s)) {
         return Verdict::Block("review records and their key are written only by tekmor verify review".into());
     }
-    if command.contains("verify review") {
-        return Verdict::Block("tekmor verify review signs a review of the tree, so the user runs it, not the agent".into());
-    }
     let ctx = Ctx {
         root,
         rules,
@@ -233,6 +230,12 @@ fn without_heredoc_data(command: &str) -> String {
     kept.join("\n")
 }
 
+fn signs_review(words: &[&str]) -> bool {
+    words
+        .windows(3)
+        .any(|w| w[1] == "verify" && w[2] == "review" && Path::new(w[0]).file_name().is_some_and(|name| name == "tekmor"))
+}
+
 fn classify_in(command: &str, ctx: Ctx<'_>, mut dir: Option<PathBuf>) -> Verdict {
     if bypasses_git_hooks(command) {
         return Verdict::Block("it skips git hooks; commits must run the pre-commit guard".into());
@@ -255,6 +258,12 @@ fn classify_in(command: &str, ctx: Ctx<'_>, mut dir: Option<PathBuf>) -> Verdict
         let start = command_start(&words);
         let step = segment_verdict(&words[..start], &words[start..], ctx, &mut dir);
         verdict = merge(verdict, step);
+        if signs_review(&words) {
+            verdict = merge(
+                verdict,
+                Verdict::Block("tekmor verify review signs a review of the tree, so the user runs it, not the agent".into()),
+            );
+        }
     }
     for target in redirect_targets(&visible) {
         for base in [ctx.root, dir.as_deref()] {
@@ -870,6 +879,71 @@ pub fn run_bash_gate() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct EditInput {
+    cwd: Option<String>,
+    tool_input: EditToolInput,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct EditToolInput {
+    file_path: Option<String>,
+    notebook_path: Option<String>,
+}
+
+const PROTECTED_HOME_DIRS: &[&str] = &[".autonomic", ".tekmor", ".ssh"];
+const PROTECTED_HOME_FILES: &[&str] = &[".gitconfig", ".zshrc", ".bashrc", ".profile"];
+
+fn is_settings_file(path: &Path) -> bool {
+    let in_claude_dir = path.parent().and_then(Path::file_name).is_some_and(|dir| dir == ".claude");
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+    in_claude_dir && name.starts_with("settings") && name.ends_with(".json")
+}
+
+pub fn edit_verdict(target: &str, cwd: Option<&Path>) -> Verdict {
+    let path = Path::new(target);
+    let path = match (path.is_absolute(), cwd) {
+        (false, Some(cwd)) => normalize(&cwd.join(path)),
+        _ => normalize(path),
+    };
+    let blocked = |what: &str| Verdict::Block(format!("{what} is changed by the user, not by the agent: {}", path.display()));
+    if is_settings_file(&path) {
+        return blocked("a Claude Code settings file, which registers the gates,");
+    }
+    if let Some(home) = home_dir().map(|home| normalize(&home)) {
+        if PROTECTED_HOME_DIRS.iter().any(|name| path.starts_with(home.join(name)))
+            || PROTECTED_HOME_FILES.iter().any(|name| path == home.join(name))
+        {
+            return blocked("tekmor's home and your shell and git configuration are");
+        }
+    }
+    let components: Vec<_> = path.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect();
+    let under = |dir: &[&str]| components.windows(dir.len()).any(|window| window.iter().zip(dir).all(|(a, b)| a == b));
+    if under(&[".git", "hooks"]) || under(&[".git", "config"]) || under(&[".verify", "artifacts", "reviews"]) {
+        return blocked("git hooks, git config and signed review records are");
+    }
+    Verdict::Allow
+}
+
+pub fn run_edit_gate() -> Result<()> {
+    let mut raw = String::new();
+    std::io::stdin().read_to_string(&mut raw)?;
+    let input: EditInput = serde_json::from_str(&raw).unwrap_or_else(|err| {
+        crate::stop_gate::hook_blocked(&format!("tekmor could not read the PreToolUse hook input ({err}); the edit is blocked"))
+    });
+    let cwd = input.cwd.map(PathBuf::from).or_else(|| std::env::current_dir().ok());
+    let Some(target) = input.tool_input.file_path.or(input.tool_input.notebook_path) else {
+        return Ok(());
+    };
+    if let Verdict::Block(reason) = edit_verdict(&target, cwd.as_deref()) {
+        record_gate_event("edit-block", &reason);
+        crate::stop_gate::hook_blocked(&format!("tekmor blocked this edit: {reason}. If it is intended, ask the user to make it."));
+    }
+    Ok(())
+}
+
 pub struct CommandRule<'a> {
     pub root: Option<&'a Path>,
     pub rules: &'a [Rule],
@@ -958,12 +1032,44 @@ mod tests {
     }
 
     #[test]
+    fn the_edit_gate_protects_gate_settings_hooks_and_reviews_only() {
+        let cwd = Path::new("/work/repo");
+        let blocked = |target: &str| matches!(edit_verdict(target, Some(cwd)), Verdict::Block(_));
+        assert!(blocked("/work/repo/.claude/settings.json"));
+        assert!(blocked(".claude/settings.local.json"));
+        assert!(blocked("/work/repo/.git/hooks/pre-commit"));
+        assert!(blocked("/work/repo/.git/config"));
+        assert!(blocked("/work/repo/.verify/artifacts/reviews/abc.json"));
+        assert!(blocked("/work/repo/src/../.claude/settings.json"));
+        assert!(!blocked("/work/repo/src/main.rs"));
+        assert!(!blocked("/work/repo/.claude/skills/x/SKILL.md"));
+        assert!(!blocked(".verify/verify.toml"));
+        assert!(!blocked("/work/repo/docs/.git-notes.md"));
+        let home = home_dir().expect("HOME");
+        assert!(blocked(&home.join(".autonomic/memory/config.yaml").display().to_string()));
+        assert!(blocked(&home.join(".zshrc").display().to_string()));
+        assert!(!blocked(&home.join(".claude/projects/p/memory/note.md").display().to_string()));
+    }
+
+    #[test]
     fn an_agent_cannot_sign_its_own_review() {
         let rules = command_rules::defaults();
-        for command in ["tekmor verify review --verdict pass", "./target/debug/tekmor verify review"] {
+        for command in [
+            "tekmor verify review --verdict pass",
+            "./target/debug/tekmor verify review",
+            "tekmor  verify 'review'",
+            "env X=1 tekmor verify review",
+            "true && tekmor verify review",
+        ] {
             assert!(matches!(classify(command, None, &rules), Verdict::Block(_)), "{command}");
         }
-        assert!(!matches!(classify("tekmor verify receipt", None, &rules), Verdict::Block(_)));
+        for command in [
+            "tekmor verify receipt",
+            "grep 'verify review' README.md",
+            "git commit -m 'document verify review'",
+        ] {
+            assert!(!matches!(classify(command, None, &rules), Verdict::Block(_)), "{command}");
+        }
     }
 
     const CASES: &str = include_str!("command_policy_cases.txt");

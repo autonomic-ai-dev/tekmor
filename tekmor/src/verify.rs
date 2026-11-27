@@ -825,22 +825,79 @@ pub fn is_proof_input(path: &str) -> bool {
     path == ".verify/verify.toml" || path == ".verify/run.sh" || path.starts_with(".verify/checks/")
 }
 
-pub fn code_tree_hash(root: &Path) -> Option<String> {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["status", "--porcelain", "--untracked-files=all"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let mut paths: Vec<String> = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|line| line.get(3..))
-        .filter_map(|path| path.rsplit(" -> ").next())
-        .filter(|path| counts_toward_tree(path))
+fn git_output(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
+    let out = std::process::Command::new("git").arg("-C").arg(root).args(args).output().ok()?;
+    out.status.success().then_some(out.stdout)
+}
+
+fn split_nul(bytes: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(bytes)
+        .split('\0')
+        .filter(|entry| !entry.is_empty())
         .map(str::to_string)
+        .collect()
+}
+
+pub fn git_changes(root: &Path) -> Option<Vec<String>> {
+    let out = git_output(root, &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
+    let mut entries = split_nul(&out).into_iter();
+    let mut paths = Vec::new();
+    while let Some(entry) = entries.next() {
+        let Some(path) = entry.get(3..) else {
+            continue;
+        };
+        if entry.as_bytes()[..2].iter().any(|status| matches!(status, b'R' | b'C')) {
+            entries.next();
+        }
+        paths.push(path.to_string());
+    }
+    Some(paths)
+}
+
+fn base_file(root: &Path) -> Option<PathBuf> {
+    let out = git_output(root, &["rev-parse", "--git-path", "tekmor-base"])?;
+    let path = PathBuf::from(String::from_utf8_lossy(&out).trim());
+    Some(if path.is_absolute() { path } else { root.join(path) })
+}
+
+pub fn record_session_base(root: &Path) -> Result<()> {
+    let (Some(head), Some(file)) = (git_head_sha(root), base_file(root)) else {
+        return Ok(());
+    };
+    fs::write(&file, head).with_context(|| format!("write {}", file.display()))
+}
+
+pub fn session_base(root: &Path) -> Option<String> {
+    let recorded = std::env::var("TEKMOR_BASE")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| fs::read_to_string(base_file(root)?).ok())?;
+    let recorded = recorded.trim();
+    git_output(root, &["rev-parse", "--verify", "--quiet", &format!("{recorded}^{{commit}}")])?;
+    git_output(root, &["merge-base", "--is-ancestor", recorded, "HEAD"])?;
+    Some(recorded.to_string())
+}
+
+pub fn diff_base(root: &Path) -> String {
+    session_base(root).unwrap_or_else(|| "HEAD".to_string())
+}
+
+pub fn changed_files(root: &Path) -> Option<Vec<String>> {
+    let mut paths = git_changes(root)?;
+    if let Some(base) = session_base(root) {
+        if let Some(out) = git_output(root, &["diff", "--name-only", "-z", "--no-renames", &base]) {
+            paths.extend(split_nul(&out));
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    Some(paths)
+}
+
+pub fn code_tree_hash(root: &Path) -> Option<String> {
+    let mut paths: Vec<String> = git_changes(root)?
+        .into_iter()
+        .filter(|path| counts_toward_tree(path))
         .collect();
     paths.sort();
     paths.dedup();
@@ -1517,6 +1574,63 @@ commands = ["./mvnw -q verify", ".verify/run.sh", "cargo test"]
 
         fs::write(dir.path().join("b.rs"), b"fn b() {}\n").unwrap();
         assert_ne!(code_tree_hash(dir.path()).as_deref(), Some(base.as_str()));
+    }
+
+    fn commit_all(root: &Path, message: &str) {
+        for args in [vec!["add", "-A"], vec!["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", message]] {
+            let status = std::process::Command::new("git").arg("-C").arg(root).args(&args).status().unwrap();
+            assert!(status.success(), "git {args:?} failed");
+        }
+    }
+
+    fn init_repo(root: &Path) {
+        let status = std::process::Command::new("git").arg("-C").arg(root).args(["init", "-q"]).status().unwrap();
+        assert!(status.success());
+        fs::write(root.join("a.rs"), b"fn a() {}\n").unwrap();
+        commit_all(root, "base");
+    }
+
+    #[test]
+    fn edits_to_files_with_spaces_or_non_ascii_names_move_the_hash() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        for name in ["a b.rs", "caf\u{e9}.rs"] {
+            fs::write(dir.path().join(name), b"fn one() {}\n").unwrap();
+            let first = code_tree_hash(dir.path()).unwrap();
+            fs::write(dir.path().join(name), b"fn two() {}\n").unwrap();
+            assert_ne!(code_tree_hash(dir.path()).unwrap(), first, "{name}");
+            assert_eq!(git_changes(dir.path()).unwrap().iter().filter(|path| path.as_str() == name).count(), 1, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_rename_lists_the_new_path_once_and_not_the_old_one() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        let status = std::process::Command::new("git").arg("-C").arg(dir.path()).args(["mv", "a.rs", "b c.rs"]).status().unwrap();
+        assert!(status.success());
+        assert_eq!(git_changes(dir.path()).unwrap(), ["b c.rs"]);
+    }
+
+    #[test]
+    fn a_commit_made_after_the_session_started_stays_in_the_changed_files() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        assert_eq!(changed_files(dir.path()).unwrap(), Vec::<String>::new());
+        record_session_base(dir.path()).unwrap();
+        fs::write(dir.path().join("b.rs"), b"fn b() {}\n").unwrap();
+        commit_all(dir.path(), "work");
+        assert!(git_changes(dir.path()).unwrap().is_empty());
+        assert_eq!(changed_files(dir.path()).unwrap(), ["b.rs"]);
+    }
+
+    #[test]
+    fn a_recorded_base_that_is_not_an_ancestor_of_head_is_ignored() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        fs::write(base_file(dir.path()).unwrap(), "0123456789012345678901234567890123456789").unwrap();
+        assert_eq!(session_base(dir.path()), None);
+        assert_eq!(diff_base(dir.path()), "HEAD");
     }
 
     #[test]
