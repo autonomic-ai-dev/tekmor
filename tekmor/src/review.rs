@@ -35,6 +35,8 @@ struct ReviewConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReviewRecord {
     pub code_hash: String,
+    #[serde(default)]
+    pub head: String,
     pub verdict: String,
     pub reviewer: String,
     pub notes: String,
@@ -110,8 +112,12 @@ fn hmac(key: &[u8], message: &[u8]) -> String {
     format!("{:x}", h.finalize())
 }
 
-fn signed_text(code_hash: &str, verdict: &str, reviewer: &str, notes: &str) -> String {
-    format!("{code_hash}\n{verdict}\n{reviewer}\n{notes}")
+fn signed_text(code_hash: &str, head: &str, verdict: &str, reviewer: &str, notes: &str) -> String {
+    format!("{code_hash}\n{head}\n{verdict}\n{reviewer}\n{notes}")
+}
+
+fn current_head(root: &Path) -> String {
+    crate::verify::git_head_sha(root).unwrap_or_default()
 }
 
 fn record_path(root: &Path, code_hash: &str) -> PathBuf {
@@ -136,13 +142,15 @@ pub fn risky_changed(root: &Path) -> Vec<String> {
 
 pub fn record(root: &Path, store: &KeyStore, code_hash: &str, verdict: &str, reviewer: &str, notes: &str) -> Result<PathBuf> {
     let key = key(store)?;
-    let mac = hmac(&key, signed_text(code_hash, verdict, reviewer, notes).as_bytes());
+    let head = current_head(root);
+    let mac = hmac(&key, signed_text(code_hash, &head, verdict, reviewer, notes).as_bytes());
     let path = record_path(root, code_hash);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let rec = ReviewRecord {
         code_hash: code_hash.into(),
+        head,
         verdict: verdict.into(),
         reviewer: reviewer.into(),
         notes: notes.into(),
@@ -162,8 +170,8 @@ fn verified_pass(root: &Path, store: &KeyStore, code_hash: &str) -> bool {
     let Ok(key) = key(store) else {
         return false;
     };
-    let expected = hmac(&key, signed_text(&rec.code_hash, &rec.verdict, &rec.reviewer, &rec.notes).as_bytes());
-    rec.code_hash == code_hash && rec.verdict == "pass" && rec.mac == expected
+    let expected = hmac(&key, signed_text(&rec.code_hash, &rec.head, &rec.verdict, &rec.reviewer, &rec.notes).as_bytes());
+    rec.code_hash == code_hash && rec.head == current_head(root) && rec.verdict == "pass" && rec.mac == expected
 }
 
 pub fn passed(root: &Path, store: &KeyStore, code_hash: Option<&str>) -> bool {
@@ -182,6 +190,27 @@ pub fn gap(root: &Path, store: &KeyStore, code_hash: Option<&str>) -> Option<Str
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    fn commit_empty(root: &Path, message: &str) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", message])
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn a_review_does_not_carry_over_to_another_commit_with_the_same_tree() {
+        let (dir, store) = repo();
+        commit_empty(dir.path(), "one");
+        let hash = "tree";
+        record(dir.path(), &store, hash, "pass", "r", "").unwrap();
+        assert!(passed(dir.path(), &store, Some(hash)));
+        commit_empty(dir.path(), "two");
+        assert!(!passed(dir.path(), &store, Some(hash)));
+    }
 
     fn repo() -> (TempDir, KeyStore) {
         let dir = TempDir::new().unwrap();
@@ -230,6 +259,7 @@ mod tests {
         let (dir, store) = repo();
         let forged = ReviewRecord {
             code_hash: "h".into(),
+            head: String::new(),
             verdict: "pass".into(),
             reviewer: "fresh-agent".into(),
             notes: "looks fine".into(),

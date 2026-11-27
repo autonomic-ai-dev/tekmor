@@ -12,6 +12,20 @@ A tracked change to `.verify/verify.toml`, `.verify/run.sh` or `.verify/checks/`
 
 If the receipt cannot be built (for example a `verify.toml` that does not parse), the stop gate blocks the turn with the error. A plain error exit is treated by the host as non-blocking and would let the turn end.
 
+## Closing the commit and path holes
+
+Found by reading the code: the gate defined changed code as the uncommitted diff, so any action that empties the diff emptied the proof requirement. Committing before stopping cleared the stop gate and also hid a weakened `run.sh`, deleted tests and risky-path edits from the receipt. The fix is a session base: a `SessionStart` hook records HEAD in `.git/tekmor-base` (inside the git dir, so never part of the tree hash), and every "what changed" question diffs against it. The base is validated as an ancestor of HEAD at read time, so a reset or rebase falls back to HEAD instead of trusting a stale sha. One file per repository means two sessions in one repository share it; the later start wins.
+
+CI deliberately does not set `TEKMOR_BASE` yet. The checkout there is the merge commit, a review is bound to a head sha, and nothing in CI can sign one, so a base would make every PR that edits `run.sh` or `checks/` unmergeable. Reading PR approvals as the review is the step that unblocks it.
+
+`git status` without `-z` quotes names with spaces or non-ASCII characters; the old parser then failed to read them and hashed the constant `<deleted>`, so edits never changed the hash. One `-z` parser (`verify::git_changes`) now feeds the tree hash, the stop gate and the checks-changed list. A rename lists the new path once and skips the origin entry.
+
+A deleted path has no mtime, so the stop gate used to see no edit and clear the turn; it now falls back to the parent directory's mtime, which a deletion updates.
+
+Reviews sign the head sha as well as the tree hash. Earlier records lack the field and no longer verify.
+
+The edit gate closes the cheapest way to switch the gates off, the Write and Edit tools on the settings file, but it matches the normalised path only. A symlink into a protected path, and a Bash-free write by another tool, are not seen. Run rows are still unsigned local SQLite rows and the review key is still readable by a session with Keychain access: both need an ACL-restricted Keychain item or a CI-signed receipt, neither of which can be checked without touching the real Keychain, so they stay open.
+
 ## Proof hardening (v1 work)
 
 - Review, ratchet, drift, check-checks, flaky handling, claim reconciliation and the black-box check are described in the `cli-proof` feature map. Each new module has tests in its own file.

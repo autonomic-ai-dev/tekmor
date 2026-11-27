@@ -30,6 +30,12 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
 - `bash-gate`: Blocks or warns on risky shell commands before they run.
   - Behaviour: `tekmor bash-gate` (`command_policy.rs`, `command_rules.rs`). It also refuses commits that skip git hooks (`commit_gate.rs`), and refuses a command whose argv is `tekmor verify review`, including inside a script it reads, so the agent is refused a direct signature. A grep or commit message that only mentions the phrase is allowed.
   - Outcome: Registered as the Claude Code PreToolUse hook for Bash.
+- `session-base`: Changed code includes commits made during the session.
+  - Behaviour: `tekmor session-start` (a `SessionStart` hook, `stop_gate.rs`) records HEAD in `.git/tekmor-base` (`verify::record_session_base`). `verify::changed_files` is the uncommitted changes plus `git diff <base>`; the receipt's checks-changed hold, test-removal guard and `review::risky_changed` diff against `verify::diff_base` (the base, or HEAD when none). `TEKMOR_BASE` overrides the file; a base that is not an ancestor of HEAD is ignored. `verify::git_changes` is the one parser for `git status -z`, so names with spaces or non-ASCII characters are hashed.
+  - Outcome: Editing, committing and stopping still asks for proof.
+- `edit-gate`: Refuses edits to the files that switch the gates off.
+  - Behaviour: `tekmor edit-gate` (`command_policy.rs`, `edit_verdict`), PreToolUse on Write, Edit, MultiEdit and NotebookEdit. It blocks Claude Code `settings*.json`, `.git/hooks`, `.git/config`, `.verify/artifacts/reviews`, and under the home directory `.autonomic`, `.tekmor`, `.ssh`, `.gitconfig` and shell rc files. Paths are normalised, not resolved through symlinks.
+  - Outcome: An agent cannot unregister the gates or change tekmor's config through the file tools.
 - `feature-map-gap`: Names the feature map that owns changed code.
   - Behaviour: `feature_map.rs` reads `.verify/features` and the `## Code` section of each map.
   - Outcome: A stop-gate block points at the map to update.
@@ -37,8 +43,8 @@ Summary: The tekmor command line as a proof eval. It runs allowlisted checks and
   - Behaviour: `gate_events.rs` writes `gate-events.jsonl` under the logs directory. The stop gate records every decision, not just blocks: `stop-clear`, `stop-verified`, `stop-block`, `stop-handback` and `stop-would-block` each carry a `reason` code (`verified`, `clear`, `check-missing`, `check-failed`, `feature-map-gap`, `review-gap`, `tests-removed`, `not-counted`, `pass-claim`) plus `repo` and `session` fields. Bash-gate events are unchanged (`bash-warn`, `bash-block`).
   - Outcome: Gate decisions can be reviewed after the fact, including how often a turn ends with changed code and no proof.
 - `claude-gate-hooks`: Registers the gates in Claude Code settings.
-  - Behaviour: `tekmor install [--global] [--quiet]` writes a PreToolUse Bash entry (`bash-gate`) and a Stop entry (`stop-gate`) into the settings file (`host_hooks.rs`). Any other option fails before anything is written (`tests/install.rs`).
-  - Outcome: Only the two proof gates are registered, and a host flag that is not supported cannot install them by accident.
+  - Behaviour: `tekmor install [--global] [--quiet]` writes a SessionStart entry (`session-start`), PreToolUse entries for Bash (`bash-gate`) and for Write, Edit, MultiEdit and NotebookEdit (`edit-gate`), and a Stop entry (`stop-gate`) into the settings file (`host_hooks.rs`). Any other option fails before anything is written (`tests/install.rs`). `tekmor doctor` reports an install that lacks the session-start or edit-gate hook.
+  - Outcome: Only the proof gates are registered, and a host flag that is not supported cannot install them by accident.
 
 - `lint-ratchet`: Lint counts may not rise above recorded baselines.
   - Behaviour: `tekmor verify ratchet` counts each rule's matches in tracked files (`ratchet.rs`, rules in `.verify/ratchet.toml`). `--update` lowers baselines only. A rule with `exclude_tests = true` skips `#[cfg(test)]` items in `.rs` files; `no-unwrap-in-binary` uses it, so its baseline is the production count.

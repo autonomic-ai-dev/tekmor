@@ -65,6 +65,12 @@ fn main() -> Result<()> {
         "bash-gate" => {
             tekmor::command_policy::run_bash_gate()?;
         }
+        "edit-gate" => {
+            tekmor::command_policy::run_edit_gate()?;
+        }
+        "session-start" => {
+            tekmor::stop_gate::run_session_start()?;
+        }
         "rules" => {
             tekmor::command_rules::run_cli(&args[2..])?;
         }

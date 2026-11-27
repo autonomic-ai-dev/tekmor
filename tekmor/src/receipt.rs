@@ -182,23 +182,27 @@ pub fn requirement_states(
 }
 
 fn protected_changes(root: &Path) -> Vec<String> {
+    let base = verify::diff_base(root);
+    let args = [
+        "diff",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        base.as_str(),
+        "--",
+        ".verify/verify.toml",
+        ".verify/run.sh",
+        ".verify/checks",
+    ];
     std::process::Command::new("git")
         .arg("-C")
         .arg(root)
-        .args([
-            "status",
-            "--porcelain",
-            "--",
-            ".verify/verify.toml",
-            ".verify/run.sh",
-            ".verify/checks",
-        ])
+        .args(args)
         .output()
         .map(|output| {
             String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .filter(|line| !line.starts_with("??"))
-                .filter_map(|line| line.get(3..))
+                .split('\0')
+                .filter(|path| !path.is_empty())
                 .map(str::to_string)
                 .collect()
         })
@@ -261,7 +265,8 @@ fn git_text(root: &Path, args: &[&str]) -> String {
 fn changed_lines(root: &Path) -> Vec<ChangedLine> {
     let mut lines = Vec::new();
     let mut file: Option<String> = None;
-    for line in git_text(root, &["diff", "HEAD", "--unified=0", "--no-color", "--no-ext-diff"]).lines() {
+    let base = verify::diff_base(root);
+    for line in git_text(root, &["diff", base.as_str(), "--unified=0", "--no-color", "--no-ext-diff"]).lines() {
         if let Some(header) = line.strip_prefix("diff --git ") {
             file = header.rsplit_once(" b/").map(|(_, path)| path.to_string());
             continue;
@@ -277,9 +282,9 @@ fn changed_lines(root: &Path) -> Vec<ChangedLine> {
             lines.push(ChangedLine { path: path.clone(), added, text: line[1..].to_string() });
         }
     }
-    for path in git_text(root, &["ls-files", "--others", "--exclude-standard"])
-        .lines()
-        .filter(|path| verify::is_code_path(path))
+    for path in git_text(root, &["ls-files", "-z", "--others", "--exclude-standard"])
+        .split('\0')
+        .filter(|path| !path.is_empty() && verify::is_code_path(path))
     {
         let Ok(text) = std::fs::read_to_string(root.join(path)) else {
             continue;
@@ -1082,6 +1087,39 @@ mod tests {
         let hash = held.code_hash.clone().ok_or_else(|| anyhow::anyhow!("no code hash"))?;
         crate::review::record(dir.path(), &keys, &hash, "pass", "reviewer", "check changed")?;
         assert_eq!(receipt_with_keys(&store, dir.path(), &keys)?.verdict, Verdict::Passed);
+        Ok(())
+    }
+
+    fn commit_work(root: &Path) -> Result<()> {
+        git(root, &["add", "-A"])?;
+        git(root, &["commit", "-qm", "work"])
+    }
+
+    #[test]
+    fn a_committed_test_removal_is_a_gap_against_the_session_base() -> Result<()> {
+        let dir = committed(&[("src/lib.rs", RUST_TEST)])?;
+        verify::record_session_base(dir.path())?;
+        put(dir.path(), "src/lib.rs", "fn a() {}\n")?;
+        commit_work(dir.path())?;
+        let gap = test_gap(dir.path()).ok_or_else(|| anyhow::anyhow!("a committed removal must be a gap"))?;
+        assert!(gap.contains("removes 1 test"), "{gap}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_committed_weaker_check_is_listed_and_held_for_review() -> Result<()> {
+        let dir = committed(&[(".verify/run.sh", "cargo test\n"), (".verify/verify.toml", "[verify]\ncommands = [\"sh -c ...\"]\n\n[verify.default]\ncommand = [\"sh\", \"-c\", \"true\"]\n")])?;
+        verify::record_session_base(dir.path())?;
+        put(dir.path(), ".verify/run.sh", "true\n")?;
+        commit_work(dir.path())?;
+        assert_eq!(protected_changes(dir.path()), [".verify/run.sh"]);
+        let aux = tempfile::TempDir::new()?;
+        let store = BrainStore::open(&aux.path().join("t.db"))?;
+        let keys = crate::review::KeyStore::File(aux.path().join("review.key"));
+        verify::run_default_step(&store, dir.path(), verify::VerifySource::Cli)?;
+        let held = receipt_with_keys(&store, dir.path(), &keys)?;
+        assert_eq!(held.verdict, Verdict::NotVerified);
+        assert!(held.review_gap.as_deref().is_some_and(|gap| gap.contains(".verify/run.sh")), "{held:?}");
         Ok(())
     }
 
