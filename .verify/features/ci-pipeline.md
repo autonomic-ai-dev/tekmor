@@ -19,6 +19,9 @@ Summary: GitHub Actions for tekmor. One CI workflow runs clippy, the Rust tests 
   - Intent: Let a merge depend on evidence CI produced, not on a receipt the author made locally.
   - Behaviour: `.github/workflows/merge-proof.yml` runs on `pull_request_target`, so the workflow and the tekmor binary come from the base branch. It checks out the pull request's head commit without credentials and runs `tekmor ci --base <base sha>` in a fresh `TEKMOR_HOME`, passing the login of an owner, member or collaborator (not the author) whose approving review is on that head commit. It writes the report to the job summary and fails unless the verdict is PASSED. It has `contents: read` and `pull-requests: read`. The earlier `receipt.yml` ran the pull request's own checks, so a PR that set `run.sh` to `exit 0` passed it (PR #279); it is removed.
   - Outcome: A pull request cannot change the checks that judge it; edited checks, removed tests and risky paths are HELD until a maintainer approves the head commit. It blocks merges once "Merge proof (tekmor ci)" is a required check in the ruleset.
+- `merge-approval`: Every merge needs the maintainer's review.
+  - Behaviour: `.github/CODEOWNERS` names `@abhiudayg` for every path. The `default-branch` ruleset requires one approving review, a code-owner review, and approval of the most recent push; new pushes dismiss earlier approvals. Agents open pull requests as `abhiudayg-ai`, a write-access account that is not a code owner.
+  - Outcome: An agent's own approval never satisfies the ruleset, and a commit pushed after the maintainer's approval needs approving again.
 - `release-publish`: Tag-driven release.
   - Intent: Ship a signed binary and release notes from a `v*` tag without a second pipeline.
   - Behaviour: `.github/workflows/release.yml` runs the CI check, then `.github/workflows/reusable-build.yml`, then publishes a GitHub release from `dist/*` with notes from `.github/scripts/changelog-extract.sh`.
@@ -27,6 +30,7 @@ Summary: GitHub Actions for tekmor. One CI workflow runs clippy, the Rust tests 
 ## Code
 
 - `.github/workflows`
+- `.github/CODEOWNERS`
 
 ## How to get to it (user POV)
 
