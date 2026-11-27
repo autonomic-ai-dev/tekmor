@@ -1,3 +1,4 @@
+pub mod ci;
 pub mod cli_help;
 pub mod doctor;
 pub mod command_policy;

@@ -20,6 +20,7 @@ pub const VERIFY_DIR_NAME: &str = ".verify";
 pub enum VerifySource {
     Cli,
     Orchestrator,
+    Ci,
 }
 
 impl VerifySource {
@@ -27,6 +28,7 @@ impl VerifySource {
         match self {
             Self::Cli => "cli",
             Self::Orchestrator => "orchestrator",
+            Self::Ci => "ci",
         }
     }
 
@@ -812,7 +814,7 @@ pub fn is_code_path(path: &str) -> bool {
     !(path.ends_with(".md") || path.ends_with(".rst"))
 }
 
-fn counts_toward_tree(path: &str) -> bool {
+pub fn counts_toward_tree(path: &str) -> bool {
     let doc = [".md", ".rst"].iter().any(|ext| path.ends_with(ext));
     let ignored = path.starts_with(".verify/artifacts/")
         || path.starts_with(".verify/features/")
@@ -822,15 +824,19 @@ fn counts_toward_tree(path: &str) -> bool {
 }
 
 pub fn is_proof_input(path: &str) -> bool {
-    path == ".verify/verify.toml" || path == ".verify/run.sh" || path.starts_with(".verify/checks/")
+    let Some(rest) = path.strip_prefix(".verify/") else {
+        return false;
+    };
+    let record = ["artifacts/", "features/", "knowledge-base/"].iter().any(|dir| rest.starts_with(dir));
+    !record && !path.ends_with(".md")
 }
 
-fn git_output(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
+pub fn git_output(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
     let out = std::process::Command::new("git").arg("-C").arg(root).args(args).output().ok()?;
     out.status.success().then_some(out.stdout)
 }
 
-fn split_nul(bytes: &[u8]) -> Vec<String> {
+pub fn split_nul(bytes: &[u8]) -> Vec<String> {
     String::from_utf8_lossy(bytes)
         .split('\0')
         .filter(|entry| !entry.is_empty())

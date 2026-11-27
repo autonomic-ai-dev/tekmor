@@ -13,6 +13,7 @@ The release history starts at v1.0.0. Earlier history is in git.
 
 ### Added
 
+- **`tekmor ci --base <REF>`: a merge proof a pull request cannot weaken.** The CI receipt used to run the pull request's own `run.sh` and compare against its own HEAD, so a PR that set `run.sh` to `exit 0` passed both required checks (shown on PR #279). `tekmor ci` runs the merge-base's check files and `[verify.default]` against the PR's committed code. A PR that edits check files, removes tests or touches risky paths is HELD until `--approved-by` names a maintainer who approved that head commit. `.github/workflows/merge-proof.yml` runs it on `pull_request_target` with tekmor built from the base branch, and `action.yml` lets other repositories use it as a GitHub Action.
 - **An edit gate** (`tekmor edit-gate`, PreToolUse on Write, Edit, MultiEdit and NotebookEdit) refuses edits to Claude Code settings files, `.git/hooks`, `.git/config`, signed review records, tekmor's home and the shell and git configuration. Run `tekmor install` again to register it.
 - `tekmor doctor` reports a repository whose `verify.toml` has no `[verify.default]` and a hook install that lacks the new hooks.
 
@@ -20,7 +21,8 @@ The release history starts at v1.0.0. Earlier history is in git.
 
 - **A failing run on the current code now fails the receipt.** Before, the newest run decided: a failing suite followed by a passing `true` read PASSED. A non-flaky failure on the same tree now gives FAILED, and the failing run is the receipt's evidence, so the stop gate names it.
 - **`[verify.default]` is the required suite when it is set.** Another passing command no longer stands in for it. `tekmor verify init` sets the default to the detected test command (for example `make test`), so running only `.verify/run.sh` in an initialised repository gives NOT VERIFIED until `make test` has run too. Without a default, one passing allowlisted command still gives PASSED.
-- **A tracked change to `.verify/verify.toml`, `run.sh` or `checks/` holds PASSED until a pass review covers the tree.** Untracked files are ignored, so a first `tekmor verify init` is unaffected.
+- **Every file under `.verify/` is a check file**, except `artifacts/`, `features/`, `knowledge-base/` and Markdown. `review.toml`, `ratchet.toml` and `broken/` were not, so an agent could drop a risky path or raise a ratchet baseline with no hold.
+- **A tracked change to a check file holds PASSED until a pass review covers the tree.** Untracked files are ignored, so a first `tekmor verify init` is unaffected.
 - **The bash gate refuses `tekmor verify review`**, matched on the command's argv, so an agent cannot sign its own review. Commands that only mention the phrase are allowed.
 - **The stop gate blocks the turn when it cannot build the receipt**, for example when `verify.toml` does not parse, instead of exiting with a non-blocking error.
 

@@ -1,0 +1,87 @@
+name: tekmor merge proof
+description: Run the base branch's tekmor checks against a pull request's commit, so a pull request cannot weaken the checks that judge it.
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  version:
+    description: tekmor version to install from crates.io; empty installs the latest
+    required: false
+    default: ''
+  token:
+    description: Token used only to read pull request reviews
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  verdict:
+    description: passed, failed, held or not_verified
+    value: ${{ steps.proof.outputs.verdict }}
+
+runs:
+  using: composite
+  steps:
+    - name: Refuse events that are not pull_request_target
+      shell: bash
+      env:
+        EVENT: ${{ github.event_name }}
+      run: |
+        if [ "$EVENT" != "pull_request_target" ]; then
+          echo "tekmor merge proof must run on pull_request_target, so the workflow comes from the base branch and not from the pull request" >&2
+          exit 2
+        fi
+
+    - name: Install tekmor
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -eu
+        if [ -n "$VERSION" ]; then
+          cargo install tekmor --locked --version "$VERSION" --root "$RUNNER_TEMP/tekmor"
+        else
+          cargo install tekmor --locked --root "$RUNNER_TEMP/tekmor"
+        fi
+
+    - name: Check out the pull request's commit
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        path: tekmor-pr
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Find a maintainer approval of this exact commit
+      id: approval
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        AUTHOR: ${{ github.event.pull_request.user.login }}
+      run: |
+        login=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate | jq -rs --arg head "$HEAD_SHA" --arg author "$AUTHOR" '
+          add // [] | map(select(.state == "APPROVED" and .commit_id == $head and .user.login != $author
+            and (.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR")))
+          | last | .user.login // empty')
+        echo "login=$login" >> "$GITHUB_OUTPUT"
+
+    - name: Run the base branch's checks against this commit
+      id: proof
+      shell: bash
+      working-directory: tekmor-pr
+      env:
+        TEKMOR_HOME: ${{ runner.temp }}/tekmor-home
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        APPROVED_BY: ${{ steps.approval.outputs.login }}
+      run: |
+        set +e
+        "$RUNNER_TEMP/tekmor/bin/tekmor" ci --base "$BASE_SHA" --approved-by "$APPROVED_BY" --json > "$RUNNER_TEMP/proof.json"
+        code=$?
+        verdict=$(jq -r '.verdict // "not_verified"' "$RUNNER_TEMP/proof.json" 2>/dev/null || echo not_verified)
+        echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+        jq -r '"**tekmor ci: \(.verdict)**\n\n- head `\(.head)`\n- checks from `\(.merge_base)`\n- command `\(.command // "none")` exit \(.exit_code // "none")\n" + ((.gaps // []) | map("- " + .) | join("\n"))' "$RUNNER_TEMP/proof.json" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+        cat "$RUNNER_TEMP/proof.json"
+        exit $code

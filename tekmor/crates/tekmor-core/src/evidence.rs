@@ -16,7 +16,7 @@ impl EvidenceRecord {
     pub fn is_run_for(&self, head: &str, hash: &str) -> bool {
         self.head_sha.as_deref() == Some(head)
             && self.code_hash.as_deref() == Some(hash)
-            && matches!(self.source.as_deref().unwrap_or("cli"), "cli" | "orchestrator")
+            && matches!(self.source.as_deref().unwrap_or("cli"), "cli" | "orchestrator" | "ci")
     }
 }
 

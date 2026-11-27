@@ -183,29 +183,8 @@ pub fn requirement_states(
 
 fn protected_changes(root: &Path) -> Vec<String> {
     let base = verify::diff_base(root);
-    let args = [
-        "diff",
-        "--name-only",
-        "-z",
-        "--no-renames",
-        base.as_str(),
-        "--",
-        ".verify/verify.toml",
-        ".verify/run.sh",
-        ".verify/checks",
-    ];
-    std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .split('\0')
-                .filter(|path| !path.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
+    verify::git_output(root, &["diff", "--name-only", "-z", "--no-renames", base.as_str(), "--", ".verify"])
+        .map(|out| verify::split_nul(&out).into_iter().filter(|path| verify::is_proof_input(path)).collect())
         .unwrap_or_default()
 }
 
